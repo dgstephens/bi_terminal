@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bi_terminal"
+version = "0.1.0"
+description = "Multi-renderer terminal client for Binventory: shared core + declarative screen specs, driving a Textual TUI and Synchronet BBS door renderers (ANSI/PETSCII/ATASCII)."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31.0",
+]
+
+# ── Renderer-specific extras ────────────────────────────────────────────────
+# `core/` and `specs/` themselves depend on NOTHING beyond the base `requests`
+# dependency above (enforced by tests/test_layering.py) — that's what lets a
+# stdio door renderer install and run with no GUI/terminal-rendering deps at
+# all. Each renderer opts into whatever extra it actually needs.
+
+[project.optional-dependencies]
+textual = [
+    "textual>=0.40.0",
+    "rich",
+    "rich-pixels>=3.0.0",
+    "ascii_magic>=2.3.0",
+    "Pillow>=10.0.0",
+]
+# ANSI/PETSCII/ATASCII door renderers: no extra deps decided yet. ANSI will
+# likely grow a Pillow dependency once renderers/_shared_ansi_art.py is
+# populated (image rendering, ported from the Textual renderer's ansi/ascii
+# conversion). PETSCII/ATASCII graphics conversion deps are unknown until
+# that work starts. See README "Sequencing" for build order.
+ansi = []
+petscii = []
+atascii = []
+
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+bi-terminal-textual = "bi_terminal.entry_textual:main"
+bi-terminal-ansi = "bi_terminal.entry_ansi:main"
+bi-terminal-petscii = "bi_terminal.entry_petscii:main"
+bi-terminal-atascii = "bi_terminal.entry_atascii:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
