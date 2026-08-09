@@ -1,13 +1,35 @@
 # bi_terminal
 
-Multi-renderer terminal client for [Binventory](https://github.com/dgstephens/bi_python)
-(Daniel's workshop-inventory tracker). One shared core + a declarative,
-renderer-agnostic screen/flow spec, driven by four renderers:
+Multi-renderer terminal client for Binventory (Daniel's workshop-inventory
+tracker; [`bi_python`](https://github.com/dgstephens/bi_python) was the
+original standalone version of the Textual client below — now archived in
+favor of this repo). One shared core + a declarative, renderer-agnostic
+screen/flow spec, driven by four renderers:
 
 1. **Textual** — the local, rich TUI (successor to `bi_python`'s app)
 2. **ANSI door** — generic 80×24 ANSI/BBS terminal, via Synchronet DOOR32.SYS or stdio
 3. **PETSCII door** — Commodore 64, 40-column, native control codes
 4. **ATASCII door** — Atari 8-bit, 40-column, its own control-code table
+
+## Just want it on your own machine?
+
+You only need renderer #1. Install and run:
+
+```
+pip install 'bi_terminal[textual] @ git+https://github.com/dgstephens/bi_terminal.git'
+bi-terminal-textual
+```
+
+That's the whole rich TUI — bins, items, images, search, everything. The
+install also registers three other commands (`bi-terminal-ansi`,
+`bi-terminal-petscii`, `bi-terminal-atascii`) — **you can ignore all three.**
+They're Synchronet BBS "door" programs meant to run on a BBS server so
+people can dial in from vintage/retro terminal software (C64, Atari 8-bit,
+generic ANSI terminals); they're not useful run directly on your own
+machine and add no extra dependencies if you never touch them. They exist
+in this same package deliberately — see below — rather than a separate
+install, so bug fixes and new features apply to every renderer, including
+the one you're using, at once.
 
 ## Why this exists, and why not just "transform the Textual output"
 
