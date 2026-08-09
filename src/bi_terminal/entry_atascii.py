@@ -1,10 +1,36 @@
-"""Console-script entry point: `bi-terminal-atascii`. See renderers/atascii/renderer.py."""
+"""Console-script entry point: `bi-terminal-atascii`.
 
-from .renderers.atascii.renderer import AtasciiRenderer
+Atari 8-bit door (README "Sequencing", step 6) — stdio-based, same shape as
+entry_ansi.py/entry_petscii.py. **`sys.stdout.buffer` is load-bearing, not
+stylistic**: plain `sys.stdout` defaults to UTF-8 text encoding, which
+would silently double-encode every ATASCII control byte above 0x7F (the
+same corruption empirically confirmed during the PETSCII increment — see
+renderers/atascii/atascii_codes.py). `AtasciiIO` is binary throughout for
+exactly this reason.
+
+Real ATASCII client verification (SyncTERM/VICE/Altirra) is a real
+follow-up, not done in this increment — see renderers/atascii/README.md for
+the socat/nc bridge that makes that a zero-setup "point the client at this
+port" moment whenever a client is available.
+"""
+
+import sys
+
+from .core import config
+from .core.api import BinInventoryAPI
+from .renderers.atascii.app import AtasciiApp
+from .renderers.atascii.io import AtasciiIO
 
 
 def main() -> None:
-    AtasciiRenderer().show_action_menu(None)  # raises NotImplementedError
+    cfg = config.load()
+    client = BinInventoryAPI(
+        base_url=cfg.get("base_url", config.DEFAULT_URL),
+        token=cfg.get("token"),
+    )
+    io = AtasciiIO(sys.stdin.fileno(), sys.stdout.buffer)
+    with io.maybe_raw_mode():
+        AtasciiApp(cfg, client, io).run()
 
 
 if __name__ == "__main__":

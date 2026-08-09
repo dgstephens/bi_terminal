@@ -125,9 +125,39 @@ tests/
    `PetsciiIO` is binary throughout (`sys.stdout.buffer`, never `sys.stdout`
    text mode). 233 total tests passing (172 pre-existing + 61 new) plus a
    real pty-driven run against Daniel's live account.
-6. **ATASCII** — next. Its own novel protocol (Atari 8-bit ANTIC/GTIA), same
-   pattern as PETSCII: research the real control codes first, build its own
-   I/O layer + renderer against the unchanged shared `AppDriver`.
+6. **ATASCII door renderer** — DONE. Same discipline as PETSCII: researched
+   from authoritative sources (Wikipedia's ATASCII article, atariarchives.org's
+   "Mapping the Atari" control-code appendix) before design. Two real
+   protocol differences from PETSCII, both confirmed rather than assumed:
+   **no character-set switch needed at all** (ASCII letters display
+   correctly with zero setup, simpler than PETSCII's `CHR$(14)`), and **no
+   color codes exist in raw ATASCII** — the *only* visual tool is inverse
+   video, and it's per-byte (set the high bit on an individual character)
+   rather than a persistent on/off mode like PETSCII's `REVERSE_ON`/`OFF`.
+   The Escape-byte assumption is on firmer ground here too: ATASCII's own
+   control-code table literally *names* byte 27 "Escape" (`renderers/
+   atascii/io.py`'s `ESCAPE_BYTE`), unlike PETSCII's externally-reasoned
+   `0x1B` guess — still flagged unverified without a real client, just less
+   of a guess. Caught a real bug via the live `nc` bridge test (not
+   assumed away): the exit message used a literal ASCII `\r` for a line
+   break, which happens to be PETSCII's real RETURN code (coincidence) but
+   is *not* a defined ATASCII control code at all (ATASCII's RETURN is
+   155) — would have rendered as a stray graphics glyph on a real Atari.
+   Fixed and re-verified live. Also extracted `renderers/_text_sanitize.py`
+   (the em-dash-etc-to-ASCII fix) as a shared module once ATASCII needed
+   the exact same logic PETSCII already had — `renderers/petscii/
+   sanitize.py` is now a thin re-export, verified behavior-preserving (all
+   61 existing PETSCII tests still pass unchanged). 304 total tests passing
+   (233 pre-existing + 71 new), plus a pty-driven manual run and a live
+   `nc` bridge test against Daniel's real account, both `xxd`-verified
+   byte-for-byte.
+
+**This completes README "Sequencing"** — Textual, ANSI, PETSCII, and
+ATASCII all now share one `AppDriver` (`driver.py`), each with only its own
+I/O layer + renderer on top. Real-client verification (SyncTERM on the Mac
+Studio, VICE on Sasquatch) for the two door renderers' Escape-byte
+assumptions remains open — not blocking, since both `nc`/`socat` bridges
+are already live-tested against real backend data.
 
 Full design rationale (including the specific bug fixes folded into the core
 extraction — a `get_shared_bins` response-key mismatch, inconsistent 404
