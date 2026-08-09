@@ -101,10 +101,33 @@ tests/
    door mode) only — DOOR32.SYS/Socket-mode wiring stays a stub
    (`renderers/ansi/door32.py`), real follow-up work for actual BBS
    deployment, out of scope for "text-only, local-testable."
-5. **PETSCII, then ATASCII** — next. Novel charset/graphics conversion work,
-   need VICE/Altirra for visual verification. Both now build directly
-   against the shared `AppDriver`, needing only their own I/O layer +
-   renderer, exactly like the ANSI increment did.
+5. **PETSCII door renderer** — DONE (text-only; `show_image` stays a no-op
+   despite declaring `ImageCapability.PETSCII_GRAPHICS`, same deliberate
+   scope limit as ANSI). Genuinely novel protocol, researched from
+   authoritative sources before design (sta.c64.org's control-code table,
+   c64-wiki's character-set page, Synchronet's own CTerm manual) rather than
+   assumed — key findings: PETSCII has **no escape sequences at all**
+   (single control bytes only, actually a simpler input model than ANSI's
+   CSI parsing), **no absolute cursor positioning** (resolved the same way
+   ANSI resolved it: full clear + sequential print, no `move(row,col)`
+   needed), and **no lowercase letters until you switch character sets**
+   (`CHR$(14)`, sent once at renderer construction). One thing the research
+   couldn't settle without a real client: the Escape-key byte
+   (`renderers/petscii/io.py`'s `ESCAPE_BYTE = 0x1B`, well-reasoned but
+   explicitly flagged unverified) — a `scripts/run_petscii_door.sh` +
+   `netcat`/`socat` bridge (`renderers/petscii/README.md`) makes real-client
+   verification a zero-setup "point SyncTERM/VICE at this port" moment
+   whenever one's available, confirmed working end-to-end against a real
+   TCP connection during this increment (byte-for-byte correct PETSCII
+   output, real backend data). Also caught and fixed, empirically, a real
+   silent-corruption bug before it ever shipped: Python's default `stdout`
+   text encoding (UTF-8) double-encodes any control byte above 0x7F, so
+   `PetsciiIO` is binary throughout (`sys.stdout.buffer`, never `sys.stdout`
+   text mode). 233 total tests passing (172 pre-existing + 61 new) plus a
+   real pty-driven run against Daniel's live account.
+6. **ATASCII** — next. Its own novel protocol (Atari 8-bit ANTIC/GTIA), same
+   pattern as PETSCII: research the real control codes first, build its own
+   I/O layer + renderer against the unchanged shared `AppDriver`.
 
 Full design rationale (including the specific bug fixes folded into the core
 extraction — a `get_shared_bins` response-key mismatch, inconsistent 404
