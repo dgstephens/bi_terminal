@@ -90,7 +90,7 @@ def test_all_menu_spec_builders_produce_expected_types():
 
 
 def test_empty_list_builders_include_extra_lines_message():
-    assert menus.my_bins_spec([]).extra_lines == ["No bins yet."]
+    assert menus.my_bins_spec([]).extra_lines == ["You have no bins yet."]
     assert menus.all_items_spec([]).extra_lines == ["You have no items yet."]
     assert menus.items_in_bin_spec([], BIN).extra_lines == ["No items in this bin."]
     assert menus.shared_bins_spec([]).extra_lines == ["No bins have been shared with you."]

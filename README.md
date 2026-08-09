@@ -59,16 +59,27 @@ tests/
 
 ## Sequencing
 
-1. **Foundation** (this increment) — scaffold, `core/` extracted+consolidated,
-   full spec schema for every existing screen, `renderers/base.py` Protocol,
-   door renderers present as `NotImplementedError` stubs.
-2. **Tracer bullet** — one screen (main menu/login) round-tripping end-to-end
-   through the Textual renderer, proving the sync-Protocol/async-Textual
-   bridging approach before porting everything.
-3. **Full Textual renderer** — port all ~15 screens from `bi_python`, reach
-   behavioral parity. Proves the spec is complete.
-4. **ANSI door renderer** — stdio/DOOR32.SYS, easiest to test locally (no
-   emulator needed).
+1. **Foundation** — DONE. Scaffold, `core/` extracted+consolidated, full spec
+   schema for every existing screen, `renderers/base.py` Protocol, door
+   renderers present as `NotImplementedError` stubs.
+2. **Tracer bullet** — DONE. One screen (the main menu) round-tripped
+   end-to-end through the Textual renderer, proving the sync-Protocol/
+   async-Textual bridging approach (a real `call_from_thread` bridge from a
+   `run_worker(thread=True)` body) before porting everything.
+3. **Full Textual renderer** — DONE. All ~15 screens ported from `bi_python`
+   (one generic `FormScreen` consuming any `FormSpec`, not six bespoke
+   classes — see `renderers/textual/screens.py`), real image rendering
+   (`renderers/_shared_ansi_art.py`, populated as planned), full
+   `core.flow`-driven orchestration in `renderers/textual/app.py`. `python3
+   -m bi_terminal.entry_textual` is a complete, working app — verified via
+   92 headless regression tests (`tests/renderers/`) plus a real run against
+   Daniel's live account. Proves the spec is complete. One real bug found
+   and fixed along the way (`_edit_item` KeyError on items with no existing
+   images); several foundation-increment spec gaps corrected against
+   bi_python's actual source (shortcut keys, missing detail fields, missing
+   list-row metadata, a missing "<- Back" choice in every list picker).
+4. **ANSI door renderer** — next. stdio/DOOR32.SYS, easiest to test locally
+   (no emulator needed).
 5. **PETSCII, then ATASCII** — novel charset/graphics conversion work, need
    VICE/Altirra for visual verification.
 

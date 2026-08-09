@@ -1,99 +1,70 @@
-"""Headless round-trip test for the tracer bullet (README "Sequencing",
-step 2): proves a sync Renderer.show_action_menu() call, driven from a
-Textual thread-worker, correctly bridges to a real Textual screen, receives
-a real simulated keypress, and returns the right dismissed value back to the
-synchronous driver code — the one nontrivial technical risk flagged in
-renderers/base.py, now verified rather than assumed.
+"""Smoke test for the real BiTerminalTextualApp (post full-parity port).
 
-Uses plain `asyncio.run()` per test rather than the pytest-asyncio plugin —
-deliberately, to avoid adding a test-only dependency nothing else in this
-repo needs; `App.run_test()` is a normal async context manager and works
-fine driven that way.
+Supersedes the tracer-bullet's placeholder-app tests (which asserted
+behavior specific to a zero-arg App with no cfg/client — obsolete now that
+BiTerminalTextualApp takes real (cfg, client) and drives the full app.flow).
+Still proves the same underlying thing the tracer bullet set out to prove —
+a sync Renderer method driven from a Textual thread-worker correctly
+bridges to a real screen and back — but against the real app, plus a basic
+global-nav round trip now that the real _Bubble-catching driver exists.
 """
 
-import asyncio
+from unittest.mock import MagicMock
 
-from bi_terminal.renderers.textual.app import BiTerminalTextualApp
 from bi_terminal.renderers.textual.screens import ActionMenuTextualScreen
-from bi_terminal.specs.base import CANCELLED
+
+from ._helpers import make_app, make_cfg, run, wait_for, wait_for_exit, wait_for_menu_titled
 
 
-async def _wait_for_main_menu(pilot, timeout: float = 5.0):
-    """The worker thread's call_from_thread(push_screen_wait, ...) call is
-    asynchronous relative to run_test()'s own setup — poll rather than
-    assume the screen is already up."""
-    elapsed = 0.0
-    step = 0.02
-    while elapsed < timeout:
-        if isinstance(pilot.app.screen, ActionMenuTextualScreen):
-            return
-        await pilot.pause(step)
-        elapsed += step
-    raise AssertionError("ActionMenuTextualScreen never appeared")
-
-
-async def _wait_for_exit(app, timeout: float = 5.0):
-    elapsed = 0.0
-    step = 0.02
-    while elapsed < timeout:
-        if not app.is_running:
-            return
-        await asyncio.sleep(step)
-        elapsed += step
-    raise AssertionError("app never exited")
-
-
-def test_pressing_exit_shortcut_returns_exit_value():
+def test_app_boots_with_token_and_shows_main_menu():
     async def _body():
-        app = BiTerminalTextualApp()
+        client = MagicMock()
+        client.get_item_count.return_value = {"number": 5}
+        app = make_app(client=client, cfg=make_cfg())
         async with app.run_test() as pilot:
-            await _wait_for_main_menu(pilot)
-            await pilot.press("x")  # Exit's shortcut in main_menu_spec
-            await _wait_for_exit(app)
-        assert app.return_value == "exit"
-
-    asyncio.run(_body())
-
-
-def test_pressing_different_shortcut_returns_that_value_not_a_fixed_one():
-    async def _body():
-        app = BiTerminalTextualApp()
-        async with app.run_test() as pilot:
-            await _wait_for_main_menu(pilot)
-            await pilot.press("b")  # "My Bins" shortcut, value "bins"
-            await _wait_for_exit(app)
-        assert app.return_value == "bins"
-
-    asyncio.run(_body())
-
-
-def test_pressing_escape_returns_cancelled_sentinel():
-    async def _body():
-        app = BiTerminalTextualApp()
-        async with app.run_test() as pilot:
-            await _wait_for_main_menu(pilot)
-            await pilot.press("escape")
-            await _wait_for_exit(app)
-        assert app.return_value is CANCELLED
-
-    asyncio.run(_body())
-
-
-def test_main_menu_has_nav_disabled_so_digit_keys_are_plain_no_ops():
-    # main_menu_spec sets nav_enabled=False (jumping to where you already
-    # are is a no-op) — a digit press should NOT dismiss the screen at all,
-    # unlike every other menu. Confirm the screen is still up afterward, then
-    # clean up with a real shortcut so the test doesn't hang.
-    async def _body():
-        app = BiTerminalTextualApp()
-        async with app.run_test() as pilot:
-            await _wait_for_main_menu(pilot)
-            await pilot.press("1")
-            await pilot.pause(0.1)
-            assert isinstance(pilot.app.screen, ActionMenuTextualScreen)
-            assert not app.return_value  # nothing dismissed yet
+            screen = await wait_for_menu_titled(pilot, "Bin Inventory")
+            assert "5 items" in screen.spec.title
+            assert "daniel@example.com" in screen.spec.prompt
             await pilot.press("x")
-            await _wait_for_exit(app)
-        assert app.return_value == "exit"
+            await wait_for_exit(app)
+        assert not app.is_running
 
-    asyncio.run(_body())
+    run(_body)
+
+
+def test_main_menu_global_nav_digit_jumps_to_bins_then_back_unwinds_stack():
+    """Pressing '2' from the main menu jumps to Bins (a harmless self-jump
+    in bi_python's terms, but proves the _Bubble/GlobalNavigate machinery
+    round-trips through the real driver, not just the tracer bullet's single
+    screen). From Bins, Esc returns to Main; base screen-stack depth is
+    restored (Textual always keeps one implicit base screen, so baseline is
+    len==1 here since nothing else was ever pushed permanently)."""
+
+    async def _body():
+        client = MagicMock()
+        client.get_item_count.return_value = {"number": 0}
+        client.get_bins_by_user.return_value = {"bins": []}
+        app = make_app(client=client)
+        async with app.run_test() as pilot:
+            await wait_for_menu_titled(pilot, "Bin Inventory")
+            # Capture the "at rest, showing one screen" depth here rather
+            # than assuming a literal number — Textual keeps an implicit
+            # base screen under everything (a real gotcha bi_python's own
+            # project memory flagged: baseline is depth 2, not 1), so the
+            # only robust check is "same depth as before," not a hardcoded
+            # constant.
+            baseline_depth = len(app.screen_stack)
+
+            await pilot.press("2")
+            from bi_terminal.renderers.textual.screens import ListPickerTextualScreen
+
+            await wait_for(pilot, lambda: isinstance(pilot.app.screen, ListPickerTextualScreen), "Bins list")
+            assert pilot.app.screen.spec.title == "My Bins"
+            await pilot.press("escape")
+            await wait_for_menu_titled(pilot, "Bin Inventory")
+            assert len(app.screen_stack) == baseline_depth
+            await pilot.press("x")
+            await wait_for_exit(app)
+        assert not app.is_running
+
+    run(_body)

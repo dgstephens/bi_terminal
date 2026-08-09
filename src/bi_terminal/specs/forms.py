@@ -21,6 +21,7 @@ from .fields import (
     SwitchField,
     TextAreaField,
     TextField,
+    TextPromptSpec,
 )
 
 
@@ -244,4 +245,29 @@ def signup_form_spec() -> FormSpec:
             ImagePathField("image_path", "Profile Image Path"),
         ],
         submit_label="Sign Up",
+    )
+
+
+def retry_image_path_spec() -> TextPromptSpec:
+    """bi_python's `_ask_retry_image_path()` — re-prompt for a single image
+    path after an "Image file not found" error, used by the Bin form's
+    create/edit retry loop (core.policy.submit_with_image_retry)."""
+    return TextPromptSpec(
+        title="Retry Image",
+        prompt="Re-enter image file path (or Enter to skip):",
+        default="",
+    )
+
+
+def retry_image_paths_spec() -> TextPromptSpec:
+    """bi_python's `_ask_retry_image_paths()` — re-prompt for one or more
+    comma-separated image paths after an "Image file not found" error, used
+    by the Item form's create/edit retry loop. The renderer/driver splits the
+    returned string on commas — this spec only owns the prompt text, matching
+    every other TextPromptSpec here (specs describe the screen, not the
+    parsing of its result)."""
+    return TextPromptSpec(
+        title="Retry Image",
+        prompt="Re-enter image file path(s) (comma-separated, or Enter to skip):",
+        default="",
     )
