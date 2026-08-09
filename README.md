@@ -46,15 +46,22 @@ src/bi_terminal/
   renderers/
     base.py     Renderer Protocol + ImageCapability enum
     textual/    the local rich TUI renderer
-    ansi/       generic ANSI door (stub until built)
+    ansi/       generic stdio ANSI/BBS door — text-only, working
     petscii/    C64 door (stub until built)
     atascii/    Atari 8-bit door (stub until built)
   entry_*.py    console-script entry points, one per renderer
+  driver.py     AppDriver — the shared flow orchestration EVERY renderer's
+                app is built from (extracted from renderers/textual/app.py
+                once building the ANSI renderer proved it was 100%
+                renderer-agnostic); depends only on core/+specs/ and the
+                Renderer protocol type, never a concrete renderer
 tests/
-  test_layering.py   architectural invariant: no textual import in core/specs
+  test_layering.py   architectural invariant: no textual import in core/specs,
+                      no rendering toolkit or concrete renderer import in driver.py
+  test_driver.py      AppDriver's flow logic via a scripted fake Renderer
   core/               unit tests for core/ (mocked requests)
   specs/              flow-graph completeness + dismiss-contract tests
-  renderers/          renderer smoke tests
+  renderers/          per-renderer tests (Textual headless, ANSI pipe-based)
 ```
 
 ## Sequencing
@@ -78,10 +85,26 @@ tests/
    images); several foundation-increment spec gaps corrected against
    bi_python's actual source (shortcut keys, missing detail fields, missing
    list-row metadata, a missing "<- Back" choice in every list picker).
-4. **ANSI door renderer** — next. stdio/DOOR32.SYS, easiest to test locally
-   (no emulator needed).
-5. **PETSCII, then ATASCII** — novel charset/graphics conversion work, need
-   VICE/Altirra for visual verification.
+4. **ANSI door renderer** — DONE (text-only; image capability stays fixed at
+   `NONE` this phase, a deliberate limitation). Along the way, extracted
+   `driver.py`'s shared `AppDriver` from `renderers/textual/app.py` — it
+   turned out ~700 lines of flow orchestration were already 100%
+   renderer-agnostic, so the ANSI renderer needed only its own I/O layer
+   (`renderers/ansi/io.py` — a `select()`-timeout-peek key reader with a
+   pushback buffer, empirically verified against a plain `os.pipe()` before
+   being written) and screen-rendering methods
+   (`renderers/ansi/renderer.py`), not a second copy of the business logic.
+   `python3 -m bi_terminal.entry_ansi` is a complete, working stdio door —
+   verified via 172 total tests (94 pre-existing + 78 new) plus a real pty
+   run against Daniel's live account (849 real items, real profile data,
+   correct scroll-window pagination, clean exit). Stdio (`Standard` I/O
+   door mode) only — DOOR32.SYS/Socket-mode wiring stays a stub
+   (`renderers/ansi/door32.py`), real follow-up work for actual BBS
+   deployment, out of scope for "text-only, local-testable."
+5. **PETSCII, then ATASCII** — next. Novel charset/graphics conversion work,
+   need VICE/Altirra for visual verification. Both now build directly
+   against the shared `AppDriver`, needing only their own I/O layer +
+   renderer, exactly like the ANSI increment did.
 
 Full design rationale (including the specific bug fixes folded into the core
 extraction — a `get_shared_bins` response-key mismatch, inconsistent 404
