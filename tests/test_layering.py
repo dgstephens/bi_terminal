@@ -3,6 +3,15 @@ bi_terminal.core and bi_terminal.specs must never import a rendering toolkit
 or any bi_terminal.renderers module. This is what lets a stdio door renderer
 install with nothing beyond `requests`.
 
+bi_terminal.driver (the shared AppDriver, extracted from
+renderers/textual/app.py once it became clear the flow-orchestration logic
+was 100% renderer-agnostic) gets a related but slightly looser check: it may
+import renderers.base (a zero-toolkit-dependency Protocol module, needed for
+a type hint) but must never import a rendering toolkit directly, nor any
+CONCRETE renderer package (renderers.textual/ansi/petscii/atascii) — doing
+so would silently reintroduce the exact duplication problem the extraction
+was meant to eliminate.
+
 AST-based (not just "try importing with textual uninstalled") so it catches
 the mistake at authoring time regardless of what's installed in the current
 environment, and reports every offending import in one run instead of
@@ -13,6 +22,7 @@ import ast
 import pathlib
 
 import bi_terminal.core as core_pkg
+import bi_terminal.driver as driver_module
 import bi_terminal.specs as specs_pkg
 
 FORBIDDEN_TOP_LEVEL = {"textual", "curses", "rich", "rich_pixels", "ascii_magic", "PIL"}
@@ -79,3 +89,32 @@ def test_specs_does_not_import_renderers_package_by_absolute_name():
                         raise AssertionError(
                             f"{py_file} ({label}) imports from bi_terminal.renderers"
                         )
+
+
+def test_driver_has_no_rendering_toolkit_imports():
+    driver_file = pathlib.Path(driver_module.__file__)
+    violations = [
+        f"{driver_file}: imports forbidden module '{root}'"
+        for root in _imported_module_roots(driver_file)
+        if root in FORBIDDEN_TOP_LEVEL
+    ]
+    assert not violations, "bi_terminal.driver must never import a rendering toolkit:\n" + "\n".join(
+        violations
+    )
+
+
+def test_driver_only_imports_renderers_base_not_a_concrete_renderer():
+    # driver.py MAY import renderers.base (a zero-toolkit Protocol module,
+    # used only as a type hint) but must never import a concrete renderer
+    # package — that would silently reintroduce per-renderer duplication,
+    # the exact problem the driver extraction eliminated.
+    driver_file = pathlib.Path(driver_module.__file__)
+    tree = ast.parse(driver_file.read_text(), filename=str(driver_file))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            module = node.module
+            if module == "renderers.base":
+                continue  # the one allowed exception
+            assert "renderers" not in module, (
+                f"{driver_file} imports a concrete renderer submodule: {module}"
+            )

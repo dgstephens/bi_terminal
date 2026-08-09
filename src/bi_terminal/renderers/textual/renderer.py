@@ -32,13 +32,24 @@ _MODE_TO_CAPABILITY = {
 
 
 class TextualRenderer:
-    def __init__(self, app, image_mode: str = "none") -> None:
+    def __init__(self, app) -> None:
         self.app = app
-        # image_mode is a per-session USER SETTING here (unlike the door
-        # renderers, where image_capability will be a fixed hardware fact) —
-        # sourced from core.config's "image_mode" key, matching bi_python.
-        self.image_mode = image_mode
-        self.image_capability = _MODE_TO_CAPABILITY.get(image_mode, ImageCapability.NONE)
+
+    @property
+    def image_mode(self) -> str:
+        """Reads app.cfg["image_mode"] FRESH on every access, rather than
+        caching it at construction — matching bi_python's own original
+        design (it re-read cfg["image_mode"] fresh on every
+        ImagePreviewScreen construction). This is also what keeps the
+        shared driver.py's _settings_menu fully renderer-agnostic: it only
+        ever writes self.cfg["image_mode"] and never needs to reach into
+        renderer internals — a real coupling problem in an earlier version
+        of this file, fixed during the driver-extraction refactor."""
+        return self.app.cfg.get("image_mode", "none")
+
+    @property
+    def image_capability(self) -> ImageCapability:
+        return _MODE_TO_CAPABILITY.get(self.image_mode, ImageCapability.NONE)
 
     def show_action_menu(self, spec: ActionMenuSpec) -> Any:
         return self.app.call_from_thread(
