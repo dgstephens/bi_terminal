@@ -68,8 +68,12 @@ def test_profile_form_spec():
     }
 
 
-def test_search_login_signup_form_specs():
-    assert isinstance(forms.search_form_spec(), FormSpec)
+def test_login_signup_form_specs():
+    # search_form_spec() was removed (2026-08-09): search is a TextPromptSpec
+    # built directly in driver.py's _search_menu() now, not a one-field
+    # FormSpec -- see driver.py's comment there for why (Ctrl+S-to-submit
+    # was a real regression; Enter must submit a search, matching every
+    # renderer's text-prompt contract).
     assert isinstance(forms.login_form_spec(), FormSpec)
     assert isinstance(forms.signup_form_spec(), FormSpec)
 

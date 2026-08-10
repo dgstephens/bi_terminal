@@ -1,8 +1,10 @@
 from unittest.mock import MagicMock
 
-from bi_terminal.renderers.textual.screens import ActionMenuTextualScreen, FormScreen, ListPickerTextualScreen
+from textual.widgets import Input
 
-from ._helpers import fill_form_fields, make_app, run, wait_for_exit, wait_for_menu_titled, wait_for_screen_type
+from bi_terminal.renderers.textual.screens import ListPickerTextualScreen, TextPromptTextualScreen
+
+from ._helpers import make_app, run, wait_for_exit, wait_for_menu_titled, wait_for_screen_type
 
 BIN = {"id": "b1", "binName": "Shelf A", "items": []}
 
@@ -15,17 +17,29 @@ def _client(search_items):
     return client
 
 
-def test_search_empty_query_notifies_and_stays_on_form():
+def _type(screen, text: str) -> None:
+    """Directly set the prompt Input's value -- same rationale as
+    _helpers.fill_form_fields: exercising Textual's own Input.value ->
+    Submitted-on-Enter wiring is Textual's job to test, not ours."""
+    screen.query_one("#prompt_input", Input).value = text
+
+
+def test_search_empty_query_notifies_and_stays_on_prompt():
+    """A bare Enter with no text is a deliberate EMPTY_SUBMIT (not CANCELLED)
+    -- driver.py's _search_menu() notifies and re-shows the same prompt.
+    This is also the regression test for the real bug reported live
+    (2026-08-09): search must submit on Enter, not require Ctrl+S."""
+
     async def _body():
         client = _client([])
         app = make_app(client=client)
         async with app.run_test() as pilot:
             await wait_for_menu_titled(pilot, "Bin Inventory")
             await pilot.press("s")  # Search Items shortcut
-            screen = await wait_for_screen_type(pilot, FormScreen)
-            await pilot.press("ctrl+s")  # submit with query blank
+            await wait_for_screen_type(pilot, TextPromptTextualScreen)
+            await pilot.press("enter")  # submit with query blank
             await pilot.pause(0.1)
-            assert isinstance(pilot.app.screen, FormScreen)  # stayed on the search form
+            assert isinstance(pilot.app.screen, TextPromptTextualScreen)  # stayed on the prompt
             await pilot.press("escape")
             await wait_for_menu_titled(pilot, "Bin Inventory")
             await pilot.press("x")
@@ -35,17 +49,17 @@ def test_search_empty_query_notifies_and_stays_on_form():
     run(_body)
 
 
-def test_search_zero_results_notifies_and_stays_on_form():
+def test_search_zero_results_notifies_and_stays_on_prompt():
     async def _body():
         client = _client([])
         app = make_app(client=client)
         async with app.run_test() as pilot:
             await wait_for_menu_titled(pilot, "Bin Inventory")
             await pilot.press("s")
-            screen = await wait_for_screen_type(pilot, FormScreen)
-            fill_form_fields(screen, {"query": "nonexistent"})
-            await pilot.press("ctrl+s")
-            await wait_for_screen_type(pilot, FormScreen)  # re-shown after "No results"
+            screen = await wait_for_screen_type(pilot, TextPromptTextualScreen)
+            _type(screen, "nonexistent")
+            await pilot.press("enter")
+            await wait_for_screen_type(pilot, TextPromptTextualScreen)  # re-shown after "No results"
             await pilot.press("escape")
             await wait_for_menu_titled(pilot, "Bin Inventory")
             await pilot.press("x")
@@ -63,13 +77,13 @@ def test_search_single_result_opens_detail_directly_no_picker():
         async with app.run_test() as pilot:
             await wait_for_menu_titled(pilot, "Bin Inventory")
             await pilot.press("s")
-            screen = await wait_for_screen_type(pilot, FormScreen)
-            fill_form_fields(screen, {"query": "widget"})
-            await pilot.press("ctrl+s")
+            screen = await wait_for_screen_type(pilot, TextPromptTextualScreen)
+            _type(screen, "widget")
+            await pilot.press("enter")
             detail = await wait_for_menu_titled(pilot, "Widget")
             assert not isinstance(detail, ListPickerTextualScreen)
             await pilot.press("b")  # item_detail's Back returns to a fresh search prompt
-            await wait_for_screen_type(pilot, FormScreen)
+            await wait_for_screen_type(pilot, TextPromptTextualScreen)
             await pilot.press("escape")
             await wait_for_menu_titled(pilot, "Bin Inventory")
             await pilot.press("x")
@@ -89,16 +103,16 @@ def test_search_multiple_results_shows_picker():
         async with app.run_test() as pilot:
             await wait_for_menu_titled(pilot, "Bin Inventory")
             await pilot.press("s")
-            screen = await wait_for_screen_type(pilot, FormScreen)
-            fill_form_fields(screen, {"query": "widget"})
-            await pilot.press("ctrl+s")
+            screen = await wait_for_screen_type(pilot, TextPromptTextualScreen)
+            _type(screen, "widget")
+            await pilot.press("enter")
             picker = await wait_for_screen_type(pilot, ListPickerTextualScreen)
             assert picker.spec.title == "Search : widget"
             assert len(picker.spec.choices) == 3  # 2 items + "<- New Search"
             await pilot.press("enter")
             await wait_for_menu_titled(pilot, "Widget A")
             await pilot.press("b")
-            await wait_for_screen_type(pilot, FormScreen)
+            await wait_for_screen_type(pilot, TextPromptTextualScreen)
             await pilot.press("escape")
             await wait_for_menu_titled(pilot, "Bin Inventory")
             await pilot.press("x")

@@ -194,23 +194,6 @@ def profile_form_spec(user: dict) -> FormSpec:
     )
 
 
-def search_form_spec() -> FormSpec:
-    """bi_python's _SearchFormScreen. Single field; the renderer's text-prompt
-    (not a full multi-field form in bi_python, but modeled as a one-field
-    FormSpec here for consistency — a renderer is free to present a
-    single-field FormSpec as a bare prompt if that's simpler for its idiom).
-    A blank Enter submit is a deliberate distinct answer from Esc-cancel — see
-    specs.fields.TextField/TextPromptSpec's distinguish_empty_submit for the
-    general mechanism; here it's expressed by the field simply having no
-    `required=True`/validator, so an empty result dict value is valid and the
-    caller (core.flow's "search" node) decides what an empty query means."""
-    return FormSpec(
-        title="Search Items",
-        fields=[TextField("query", "Search")],
-        submit_label="Search",
-    )
-
-
 def login_form_spec() -> FormSpec:
     """bi_python's _LoginFormScreen. Result dict: {email, password}."""
     return FormSpec(

@@ -42,8 +42,8 @@ from .core.models import (
     repopulate_item_bin_refs,
 )
 from .core.policy import fetch_list, submit_with_image_retry
-from .specs.base import CANCELLED
-from .specs.fields import ConfirmSpec
+from .specs.base import CANCELLED, EMPTY_SUBMIT
+from .specs.fields import ConfirmSpec, TextPromptSpec
 from .specs.forms import (
     bin_form_spec,
     item_form_spec,
@@ -51,7 +51,6 @@ from .specs.forms import (
     profile_form_spec,
     retry_image_path_spec,
     retry_image_paths_spec,
-    search_form_spec,
     signup_form_spec,
 )
 from .specs.menus import (
@@ -574,10 +573,24 @@ class AppDriver:
 
     def _search_menu(self) -> None:
         while True:
-            result = self.renderer.show_form(search_form_spec())
+            # A TextPromptSpec, not a one-field FormSpec -- search must submit
+            # on a bare Enter (matching every other renderer's text-prompt
+            # contract), not require Ctrl+S like a multi-field form. This was
+            # a real regression (reported live, 2026-08-09): search had been
+            # built as `show_form(search_form_spec())` instead, which forced
+            # Ctrl+S in the Textual renderer and had no working Enter-submits
+            # at all in the door renderers either -- the same bug, once, in
+            # the one shared driver, not four separate renderer-specific
+            # bugs. distinguish_empty_submit=True is exactly what
+            # TextPromptSpec's own docstring says it exists for: telling a
+            # deliberate blank Enter (EMPTY_SUBMIT, "try again" notice) apart
+            # from Esc (CANCELLED, silently back to main menu).
+            result = self.renderer.show_text_prompt(
+                TextPromptSpec(title="Search Items", prompt="Search", distinguish_empty_submit=True)
+            )
             if result is CANCELLED:
                 return  # Esc = cancel, back to main menu
-            query = result["query"]
+            query = "" if result is EMPTY_SUBMIT else result
             if not query:
                 self.renderer.notify(
                     "You didn't search for anything. Please type something and try again.",
