@@ -18,10 +18,22 @@ from textual.app import App
 
 from ...core.api import BinInventoryAPI
 from ...driver import AppDriver
+from . import css
 from .renderer import TextualRenderer
 
 
 class BiTerminalTextualApp(App):
+    # Without this, every widget falls back to Textual's bare built-in
+    # defaults -- discovered live (2026-08-09) when Daniel reported
+    # multi-line-looking single-line fields, invisible combo/list-picker
+    # dropdowns (arrow-key selection worked, nothing was visible), and an
+    # image viewer that appeared to do nothing. All three turned out to be
+    # the SAME bug: css.py's CSS string was fully written (Input height:1,
+    # OptionList sizing, #img-preview* sizing, combo-box layout, colors --
+    # see css.py) but never actually wired into the App class. Confirmed by
+    # grepping app.py for "CSS" and finding zero references before this fix.
+    CSS = css.CSS
+
     def __init__(self, cfg: dict, client: BinInventoryAPI):
         super().__init__()
         self.cfg = cfg
