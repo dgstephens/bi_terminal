@@ -368,8 +368,22 @@ class PetsciiRenderer:
         # the PETSCII_GRAPHICS capability declaration. Not a SILENT no-op
         # though -- that was indistinguishable from the "View Image(s)"
         # keypress just not working at all, a real live-reported bug
-        # (2026-08-10). notify() instead so the user gets an actual answer.
+        # (2026-08-10).
+        #
+        # Fixed once already with just a notify() call, which turned out to
+        # be incomplete -- still live-reported broken ("images still do not
+        # show and there is nothing that tells an interactor why"), because
+        # notify() alone is a single line written synchronously, with
+        # NOTHING pacing it against whatever happens next: the caller
+        # (driver.py's _item_detail loop) immediately calls _menu() again,
+        # which clears the screen right away. The message could be wiped
+        # before a real, network-latency caller ever sees it, or before
+        # it's even fully transmitted. Genuinely waiting for a keypress
+        # here -- not just writing text -- is what actually pins the
+        # message on screen until the user has read it.
         self.notify("Images aren't supported in this PETSCII display yet.", severity="information")
+        self.io.write_raw(pc.MEDIUM_GREY + _enc(_truncate("Press any key to continue...")) + b"\r")
+        self.io.read_key()
 
     def notify(self, message: str, severity: str = "information") -> None:
         color = {"error": pc.RED, "warning": pc.YELLOW}.get(severity, pc.WHITE)

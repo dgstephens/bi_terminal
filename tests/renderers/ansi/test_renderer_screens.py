@@ -430,13 +430,24 @@ def test_show_image_renders_nothing_but_notifies_not_supported():
     """No image rendering (image_capability is fixed at NONE this
     increment) but NOT a silent no-op -- a real, live-reported bug
     (2026-08-10): pressing "View Image(s)" and getting zero feedback at
-    all was indistinguishable from the keypress just not working."""
-    r, out, fds = _make(b"")
+    all was indistinguishable from the keypress just not working.
+
+    First fix attempt (a bare notify() call) was ALSO reported still
+    broken -- the message was written but nothing paced it against the
+    very next thing the caller does (_item_detail's loop immediately
+    clears the screen again), so a real network-latency caller could never
+    actually see it. show_image() must now block on a real keypress before
+    returning -- that's what "x" in the input bytes below is standing in
+    for; without a real read_key() call in the implementation, this test
+    would leave that byte unconsumed rather than hang like a bare empty
+    pipe would."""
+    r, out, fds = _make(b"x")
     result = r.show_image(["https://example.com/x.png"])
     val = out.getvalue()
     _close(fds)
     assert result is None
     assert "aren't supported" in val.lower()
+    assert "press any key" in val.lower()
 
 
 def test_notify_error_severity_has_marker():
