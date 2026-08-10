@@ -14,6 +14,7 @@ PetsciiIO's out_stream must accept bytes, not str.
 import os
 import select
 import termios
+import time
 import tty
 from contextlib import contextmanager
 from typing import Any, Optional, Union
@@ -45,8 +46,37 @@ class PetsciiKeyReader:
     buffer needed (unlike renderers/ansi/io.py's KeyReader) — there's no
     multi-byte sequence to disambiguate in raw PETSCII."""
 
-    def __init__(self, fd: int) -> None:
+    def __init__(self, fd: int, debug_log_path: Optional[str] = None) -> None:
         self.fd = fd
+        # Opt-in diagnostic only (see entry_petscii.py's
+        # BI_TERMINAL_PETSCII_DEBUG_LOG env var) -- added 2026-08-10 to
+        # investigate a real, live-reported bug: cursor keys AND backspace
+        # not working through a real Synchronet BBS connection, despite a
+        # direct byte capture (nc bridge, SyncTERM Telnet) proving SyncTERM
+        # sends exactly the bytes this reader already expects (145/17/157/
+        # 29 for up/down/left/right, 20 for backspace). Every one of those
+        # is a raw control-range byte (0-31 or 128-159); the working ANSI
+        # equivalents are ESC + ordinary printable characters, never a raw
+        # control byte. Leading hypothesis: something in Synchronet's
+        # Standard I/O door channel (no PETSCII-aware DOOR32.SYS emulation
+        # value exists) filters/alters control-range bytes before they
+        # reach this process -- but that's unproven without seeing what
+        # actually arrives THROUGH a real Synchronet connection, which the
+        # earlier nc-bridge test deliberately couldn't include (no
+        # Synchronet in that path at all). Logs every raw byte received and
+        # what key it resolved to (or "UNRECOGNIZED"), so a real BBS test
+        # can capture ground truth. Off by default -- zero cost, zero risk,
+        # unless explicitly enabled.
+        self._debug_log_path = debug_log_path
+
+    def _log(self, raw: int, resolved) -> None:
+        if not self._debug_log_path:
+            return
+        try:
+            with open(self._debug_log_path, "a") as f:
+                f.write(f"{time.time():.3f} raw=0x{raw:02x} ({raw}) -> {resolved!r}\n")
+        except Exception:
+            pass  # a debug log must never be able to crash or block the door
 
     def read_key(self, timeout: Optional[float] = None) -> Optional[str]:
         r, _, _ = select.select([self.fd], [], [], timeout)
@@ -57,20 +87,29 @@ class PetsciiKeyReader:
             return None
         n = b[0]
         if n in _CURSOR_KEYS:
+            self._log(n, _CURSOR_KEYS[n])
             return _CURSOR_KEYS[n]
         if n == 13:
+            self._log(n, "enter")
             return "enter"
         if n == 20:
+            self._log(n, "backspace")
             return "backspace"
         if n == ESCAPE_BYTE:
+            self._log(n, "escape")
             return "escape"
         if n == 3:
+            self._log(n, "ctrl+c")
             return "ctrl+c"
         if n == 9:
+            self._log(n, "tab")
             return "tab"
         try:
-            return bytes([n]).decode("ascii")
+            key = bytes([n]).decode("ascii")
+            self._log(n, key)
+            return key
         except UnicodeDecodeError:
+            self._log(n, "UNRECOGNIZED")
             return None  # some other PETSCII control byte we don't handle — ignore
 
 
@@ -82,10 +121,10 @@ class PetsciiIO:
     control byte above 0x7F via Python's default UTF-8 (empirically
     confirmed during this project's own research; see petscii_codes.py)."""
 
-    def __init__(self, in_fd: int, out_stream) -> None:
+    def __init__(self, in_fd: int, out_stream, debug_log_path: Optional[str] = None) -> None:
         self.in_fd = in_fd
         self.out = out_stream
-        self.keys = PetsciiKeyReader(in_fd)
+        self.keys = PetsciiKeyReader(in_fd, debug_log_path=debug_log_path)
 
     def write_raw(self, data: bytes) -> None:
         self.out.write(data)

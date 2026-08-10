@@ -18,8 +18,20 @@ whenever a client is available.
 leaked to the next caller's connection — see entry_ansi.py's docstring and
 driver.py's AppDriver.__init__ docstring for the full story. Uses
 config.door_cfg() + AppDriver(persist_config=False) now, same fix as ANSI.
+
+**Diagnostic env var (2026-08-10):** set BI_TERMINAL_PETSCII_DEBUG_LOG to a
+writable file path to log every raw byte this door receives and what key
+it resolved to — added to investigate a real, live-reported bug (cursor
+keys + backspace not working through a real Synchronet BBS connection,
+despite a direct byte capture proving SyncTERM sends exactly the bytes
+this renderer's io.py already expects). Off by default; see
+renderers/petscii/io.py's PetsciiKeyReader docstring for the full story.
+Set this in the door's SCFG "Environment variable(s) to set" field (or
+Command Line, if SCFG lets you export inline) for one real BBS session,
+then read the file to see ground truth.
 """
 
+import os
 import sys
 
 from .core import config
@@ -31,7 +43,8 @@ from .renderers.petscii.io import PetsciiIO
 def main() -> None:
     cfg = config.door_cfg()
     client = BinInventoryAPI(base_url=cfg["base_url"])
-    io = PetsciiIO(sys.stdin.fileno(), sys.stdout.buffer)
+    debug_log_path = os.environ.get("BI_TERMINAL_PETSCII_DEBUG_LOG")
+    io = PetsciiIO(sys.stdin.fileno(), sys.stdout.buffer, debug_log_path=debug_log_path)
     with io.maybe_raw_mode():
         PetsciiApp(cfg, client, io, persist_config=False).run()
 

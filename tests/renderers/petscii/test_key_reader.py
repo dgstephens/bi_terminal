@@ -118,3 +118,34 @@ def test_unrecognized_high_control_byte_is_ignored_not_crashed():
     a color code arriving as bogus input) must be silently ignored, not
     raise -- followed by a real key to confirm the reader keeps working."""
     assert _keys(bytes([144]) + b"b", 2) == [None, "b"]
+
+
+def test_debug_log_records_raw_byte_and_resolved_key(tmp_path):
+    """New diagnostic capability (2026-08-10), added to investigate a real,
+    live-reported bug: cursor keys + backspace not working through a real
+    Synchronet BBS connection. Off by default (debug_log_path=None, the
+    default in every other test in this file) -- this is the one test that
+    actually exercises it."""
+    log_path = tmp_path / "petscii_debug.log"
+    r_fd, w_fd = os.pipe()
+    try:
+        os.write(w_fd, bytes([145, 20, 98]))  # up, backspace, "b"
+        reader = PetsciiKeyReader(r_fd, debug_log_path=str(log_path))
+        keys = [reader.read_key(timeout=1.0) for _ in range(3)]
+        assert keys == ["up", "backspace", "b"]
+        lines = log_path.read_text().splitlines()
+        assert len(lines) == 3
+        assert "raw=0x91 (145) -> 'up'" in lines[0]
+        assert "raw=0x14 (20) -> 'backspace'" in lines[1]
+        assert "raw=0x62 (98) -> 'b'" in lines[2]
+    finally:
+        os.close(r_fd)
+        os.close(w_fd)
+
+
+def test_debug_log_none_path_never_creates_a_file(tmp_path):
+    """The off-by-default guarantee -- a debug feature that silently
+    creates files nobody asked for would be its own bug."""
+    would_be_log = tmp_path / "should_not_exist.log"
+    assert _keys(b"b", 1) == ["b"]
+    assert not would_be_log.exists()
