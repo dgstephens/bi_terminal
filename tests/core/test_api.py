@@ -4,6 +4,7 @@ here; this is new, not a port. All HTTP calls are mocked; no network access."""
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from bi_terminal.core.api import BinInventoryAPI
 from bi_terminal.core.errors import APIError, ImageFileNotFoundError
@@ -26,6 +27,7 @@ def test_login_posts_credentials(mock_post):
     mock_post.assert_called_once_with(
         "https://api.example.com/api/users/login",
         json={"email": "a@b.com", "password": "hunter2"},
+        timeout=15,
     )
     assert result["token"] == "t"
 
@@ -56,6 +58,61 @@ def test_check_raises_apierror_with_status_code_on_failure(mock_get):
         api.get_bin("missing")
     assert exc_info.value.status_code == 404
     assert "not found" in str(exc_info.value)
+
+
+# ── Connection-level failures (no internet) ──────────────────────────────
+# Real, live-reported bug (2026-08-10): "bi-terminal-textual crashes without
+# internet". Root cause: every endpoint method called requests.get/post/etc
+# directly, with the only try/except wrapping _check() (HTTP error
+# *responses*). A ConnectionError/Timeout when genuinely offline is a
+# different exception type than APIError -- nothing caught it, so it
+# crashed the whole app. Fixed once, centrally, in _request(). These tests
+# cover every requests.exceptions.RequestException subclass that can
+# realistically happen when offline, across both call shapes in this file
+# (plain requests.get/post/delete, and _send_form's multipart/JSON path),
+# to make sure the central fix actually reaches every call site.
+
+
+@patch("bi_terminal.core.api.requests.get")
+def test_connection_error_becomes_apierror_not_a_crash(mock_get):
+    mock_get.side_effect = requests.exceptions.ConnectionError("no route to host")
+    api = BinInventoryAPI("https://api.example.com/api")
+    with pytest.raises(APIError) as exc_info:
+        api.get_bins_by_user("u1")
+    assert exc_info.value.status_code == 0  # no HTTP response was ever received
+    assert "Could not reach" in str(exc_info.value)
+
+
+@patch("bi_terminal.core.api.requests.post")
+def test_timeout_becomes_apierror(mock_post):
+    mock_post.side_effect = requests.exceptions.Timeout("timed out")
+    api = BinInventoryAPI("https://api.example.com/api")
+    with pytest.raises(APIError):
+        api.login("a@b.com", "hunter2")
+
+
+@patch("bi_terminal.core.api.requests.post")
+def test_send_form_json_path_also_wraps_connection_errors(mock_post):
+    """_send_form's no-files (JSON) branch is a separate call shape from
+    the plain requests.get/post ones above -- covered separately since it's
+    exactly the kind of second call shape a manual per-site fix could have
+    missed."""
+    mock_post.side_effect = requests.exceptions.ConnectionError("offline")
+    api = BinInventoryAPI("https://api.example.com/api")
+    with pytest.raises(APIError):
+        api.signup("Daniel", "a@b.com", "hunter2")
+
+
+@patch("bi_terminal.core.api.requests.post")
+def test_send_form_multipart_path_also_wraps_connection_errors(mock_post, tmp_path):
+    """_send_form's files branch -- the third and last distinct call
+    shape in this module."""
+    image = tmp_path / "photo.jpg"
+    image.write_bytes(b"fake image bytes")
+    mock_post.side_effect = requests.exceptions.ConnectionError("offline")
+    api = BinInventoryAPI("https://api.example.com/api")
+    with pytest.raises(APIError):
+        api.signup("Daniel", "a@b.com", "hunter2", image_path=str(image))
 
 
 @patch("bi_terminal.core.api.requests.get")
@@ -111,4 +168,5 @@ def test_search_items_posts_query_only(mock_post):
         "https://api.example.com/api/items/search",
         json={"q": "widget"},
         headers={"Authorization": "Bearer t"},
+        timeout=15,
     )

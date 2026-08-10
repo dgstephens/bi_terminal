@@ -40,6 +40,32 @@ class BinInventoryAPI:
     def _auth(self) -> dict:
         return {"Authorization": f"Bearer {self.token}"} if self.token else {}
 
+    def _request(self, method: str, url: str, **kwargs) -> requests.Response:
+        """The one place every HTTP call in this class goes through — real,
+        live-reported bug (2026-08-10): every endpoint method used to call
+        requests.get/post/etc directly, with try/except only ever wrapping
+        _check() (HTTP error *responses*, 4xx/5xx). A genuine connection
+        failure (no internet, DNS failure, timeout) never produces a
+        response at all -- requests raises RequestException, a totally
+        different exception type than APIError, which nothing caught, so it
+        propagated all the way up and crashed the whole app (reported as
+        "bi-terminal-textual crashes without internet"). Wrapping it here
+        once, rather than at all ~13 call sites individually, is both the
+        DRY fix and the one that can't accidentally miss a call site the
+        way manually patching each one could.
+
+        Also sets a default timeout -- none of this file's ~13 call sites
+        ever passed one, so a network that's unreachable-but-not-actively-
+        refused (packets just silently dropped, vs. an immediate "no
+        route"/DNS failure) would have hung `requests` forever instead of
+        raising promptly. 15s is generous for a JSON API call/small image
+        upload but still bounded."""
+        kwargs.setdefault("timeout", 15)
+        try:
+            return getattr(requests, method)(url, **kwargs)
+        except requests.exceptions.RequestException as e:
+            raise APIError(f"Could not reach the Binventory server: {e}", status_code=0) from e
+
     def _check(self, resp: requests.Response) -> dict:
         if not resp.ok:
             try:
@@ -61,7 +87,7 @@ class BinInventoryAPI:
         """
         headers = self._auth()
         if files:
-            resp = getattr(requests, method)(url, data=data, files=files, headers=headers)
+            resp = self._request(method, url, data=data, files=files, headers=headers)
         else:
             # Convert list-of-tuples to dict, collecting duplicate keys as lists
             body: dict = {}
@@ -72,13 +98,14 @@ class BinInventoryAPI:
                     body[k].append(v)
                 else:
                     body[k] = v
-            resp = getattr(requests, method)(url, json=body, headers=headers)
+            resp = self._request(method, url, json=body, headers=headers)
         return self._check(resp)
 
     # ── Auth ──────────────────────────────────────────────────────────────
 
     def login(self, email: str, password: str) -> dict:
-        resp = requests.post(
+        resp = self._request(
+            "post",
             f"{self.base_url}/users/login",
             json={"email": email, "password": password},
         )
@@ -104,7 +131,7 @@ class BinInventoryAPI:
     # ── Users ─────────────────────────────────────────────────────────────
 
     def get_user(self, user_id: str) -> dict:
-        resp = requests.get(f"{self.base_url}/users/{user_id}", headers=self._auth())
+        resp = self._request("get", f"{self.base_url}/users/{user_id}", headers=self._auth())
         return self._check(resp)
 
     def update_user(
@@ -133,18 +160,18 @@ class BinInventoryAPI:
     # ── Bins ──────────────────────────────────────────────────────────────
 
     def get_bin(self, bin_id: str) -> dict:
-        resp = requests.get(f"{self.base_url}/bins/{bin_id}", headers=self._auth())
+        resp = self._request("get", f"{self.base_url}/bins/{bin_id}", headers=self._auth())
         return self._check(resp)
 
     def get_bins_by_user(self, user_id: str) -> dict:
-        resp = requests.get(f"{self.base_url}/bins/user/{user_id}", headers=self._auth())
+        resp = self._request("get", f"{self.base_url}/bins/user/{user_id}", headers=self._auth())
         return self._check(resp)
 
     def get_shared_bins(self, user_id: str) -> dict:
         """Returns {"bins": [...]} — normalized from the backend's actual
         {"bin": [...]} (singular) key, which is inconsistent with every other
         list endpoint here. See module docstring."""
-        resp = requests.get(f"{self.base_url}/bins/user/shared/{user_id}", headers=self._auth())
+        resp = self._request("get", f"{self.base_url}/bins/user/shared/{user_id}", headers=self._auth())
         data = self._check(resp)
         if "bin" in data and "bins" not in data:
             data = {**data, "bins": data["bin"]}
@@ -200,21 +227,21 @@ class BinInventoryAPI:
         return self._send_form("patch", f"{self.base_url}/bins/{bin_id}", data, files)
 
     def delete_bin(self, bin_id: str) -> dict:
-        resp = requests.delete(f"{self.base_url}/bins/{bin_id}", headers=self._auth())
+        resp = self._request("delete", f"{self.base_url}/bins/{bin_id}", headers=self._auth())
         return self._check(resp)
 
     # ── Items ─────────────────────────────────────────────────────────────
 
     def get_item(self, item_id: str) -> dict:
-        resp = requests.get(f"{self.base_url}/items/{item_id}", headers=self._auth())
+        resp = self._request("get", f"{self.base_url}/items/{item_id}", headers=self._auth())
         return self._check(resp)
 
     def get_items_by_user(self, user_id: str) -> dict:
-        resp = requests.get(f"{self.base_url}/items/user/{user_id}", headers=self._auth())
+        resp = self._request("get", f"{self.base_url}/items/user/{user_id}", headers=self._auth())
         return self._check(resp)
 
     def get_items_by_bin(self, bin_id: str) -> dict:
-        resp = requests.get(f"{self.base_url}/items/bin/{bin_id}", headers=self._auth())
+        resp = self._request("get", f"{self.base_url}/items/bin/{bin_id}", headers=self._auth())
         return self._check(resp)
 
     def search_items(self, query: str) -> dict:
@@ -229,7 +256,8 @@ class BinInventoryAPI:
         compatibility with an older client-side search implementation; dropped
         here since nothing in this codebase needs it.)
         """
-        resp = requests.post(
+        resp = self._request(
+            "post",
             f"{self.base_url}/items/search",
             json={"q": query},
             headers=self._auth(),
@@ -237,7 +265,8 @@ class BinInventoryAPI:
         return self._check(resp)
 
     def get_item_count(self, user_id: str) -> dict:
-        resp = requests.get(
+        resp = self._request(
+            "get",
             f"{self.base_url}/items/items/number/{user_id}",
             headers=self._auth(),
         )
@@ -318,5 +347,5 @@ class BinInventoryAPI:
         return self._send_form("patch", f"{self.base_url}/items/{item_id}", data, files)
 
     def delete_item(self, item_id: str) -> dict:
-        resp = requests.delete(f"{self.base_url}/items/{item_id}", headers=self._auth())
+        resp = self._request("delete", f"{self.base_url}/items/{item_id}", headers=self._auth())
         return self._check(resp)
