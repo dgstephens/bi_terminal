@@ -47,9 +47,14 @@ def test_view_bins_then_back_then_exit():
     }
     val, exits = _run(b"b" + bytes([0x1B]) + b"x", _cfg(), client)
     assert exits == [True]
-    assert b"Bin Inventory" in val
-    assert b"My Bins" in val
-    assert b"Shelf A" in val
+    # Case is deliberately swapped in the RAW bytes on the wire -- see
+    # sanitize.py's module docstring (real bug, fixed 2026-08-10): PETSCII's
+    # charset-2 "lowercase mode," which this renderer stays in for its
+    # whole session, displays these bytes CORRECTLY-cased on a real C64
+    # screen precisely because they're swapped here first.
+    assert b"bIN iNVENTORY" in val
+    assert b"mY bINS" in val
+    assert b"sHELF a" in val
     client.get_bins_by_user.assert_called_once_with("u1")
 
 

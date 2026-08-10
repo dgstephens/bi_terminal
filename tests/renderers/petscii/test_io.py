@@ -28,11 +28,30 @@ def test_write_raw_passes_bytes_through_unmodified():
     assert out.getvalue() == pc.CLR + pc.CYAN
 
 
+def test_write_text_swaps_case_for_petscii_lowercase_mode():
+    """Real, live-reported bug (2026-08-10): "the PETSCII version has upper
+    and lower case letters switched." Root cause: PetsciiRenderer sends
+    SWITCH_TO_LOWERCASE once at construction and never switches back, so
+    the whole session is in PETSCII's charset 2 -- where the byte values
+    ASCII considers uppercase display as LOWERCASE on a real C64 screen,
+    and vice versa. Confirmed against multiple independent PETSCII
+    references (see sanitize.py's module docstring). write_text must swap
+    case BEFORE encoding, so the swap and the C64's own charset inversion
+    cancel out and the caller sees correctly-cased text."""
+    io_obj, out, fds = _make(b"")
+    io_obj.write_text("Hello World")
+    _close(fds)
+    assert out.getvalue() == b"hELLO wORLD"
+
+
 def test_write_text_sanitizes_em_dash():
     io_obj, out, fds = _make(b"")
     io_obj.write_text("Bin Inventory — 5 items")
     _close(fds)
-    assert out.getvalue() == b"Bin Inventory - 5 items"
+    # Case swapped deliberately -- see sanitize.py's module docstring (real
+    # bug, fixed 2026-08-10): this is what displays CORRECTLY-cased on a
+    # real C64 in the charset-2 "lowercase mode" this renderer uses.
+    assert out.getvalue() == b"bIN iNVENTORY - 5 ITEMS"
 
 
 def test_write_text_never_double_encodes_high_bytes_as_utf8():
@@ -59,7 +78,7 @@ def test_maybe_raw_mode_is_a_noop_on_a_non_tty_fd():
     with io_obj.maybe_raw_mode():
         io_obj.write_text("inside")
     _close(fds)
-    assert out.getvalue() == b"inside"
+    assert out.getvalue() == b"INSIDE"  # case swapped -- see sanitize.py
 
 
 def test_read_line_basic():

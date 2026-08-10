@@ -167,7 +167,7 @@ def test_list_picker_scroll_window_for_long_lists_is_smaller_than_ansi():
     val = out.getvalue()
     _close(fds)
     assert result == 0
-    assert b"of 20" in val
+    assert b"OF 20" in val  # case swapped -- see sanitize.py
 
 
 # ── show_form ────────────────────────────────────────────────────────────
@@ -359,7 +359,7 @@ def test_notify_error_uses_red_control_byte():
     val = out.getvalue()
     _close(fds)
     assert pc.RED in val
-    assert b"Something broke" in val
+    assert b"sOMETHING BROKE" in val  # case swapped -- see sanitize.py
 
 
 def test_notify_warning_uses_yellow_control_byte():
