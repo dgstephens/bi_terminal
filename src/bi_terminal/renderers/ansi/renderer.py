@@ -332,8 +332,11 @@ class AnsiRenderer:
 
     def show_image(self, urls: List[str], start_index: int = 0) -> None:
         # image_capability is fixed at NONE this increment — no-op per the
-        # documented Renderer contract (see module docstring).
-        return None
+        # documented Renderer contract (see module docstring), but a SILENT
+        # no-op is indistinguishable from the "View Image(s)" keypress just
+        # not working at all -- a real, live-reported bug (2026-08-10).
+        # notify() instead so the user gets an actual answer.
+        self.notify("Images aren't supported in this ANSI display yet.", severity="information")
 
     def notify(self, message: str, severity: str = "information") -> None:
         color = {"error": RED, "warning": YELLOW}.get(severity, WHITE)

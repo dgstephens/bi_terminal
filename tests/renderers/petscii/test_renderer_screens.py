@@ -328,11 +328,18 @@ def test_text_prompt_distinguishes_empty_submit_from_cancel():
 # ── show_image / notify ──────────────────────────────────────────────────
 
 
-def test_show_image_is_a_noop_despite_declared_capability():
+def test_show_image_renders_nothing_but_notifies_not_supported():
+    """No image rendering (despite the declared PETSCII_GRAPHICS capability
+    -- see module docstring) but NOT a silent no-op -- a real,
+    live-reported bug (2026-08-10): pressing "View Image(s)" and getting
+    zero feedback at all was indistinguishable from the keypress just not
+    working."""
     r, out, fds = _make(b"")
     result = r.show_image(["https://example.com/x.png"])
+    val = out.getvalue()
     _close(fds)
     assert result is None
+    assert b"aren't supported" in val.lower()
 
 
 def test_notify_error_uses_red_control_byte():

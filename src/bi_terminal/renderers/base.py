@@ -91,7 +91,11 @@ class Renderer(Protocol):
         an open design question for that phase, not resolved here). Renders
         according to `self.image_capability`; a renderer with NONE should
         make this a no-op rather than erroring, so callers don't need to
-        branch on capability before calling it."""
+        branch on capability before calling it — but "no-op" means no
+        rendering, not necessarily zero user feedback. A NONE renderer
+        SHOULD still `self.notify(...)` that images aren't supported here
+        (a real, live-reported bug fixed 2026-08-10: a totally silent no-op
+        was indistinguishable from the keypress just not working at all)."""
         ...
 
     def notify(self, message: str, severity: str = "information") -> None:

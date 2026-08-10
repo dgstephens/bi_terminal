@@ -365,8 +365,11 @@ class PetsciiRenderer:
 
     def show_image(self, urls: List[str], start_index: int = 0) -> None:
         # See module docstring — a deliberate no-op this increment despite
-        # the PETSCII_GRAPHICS capability declaration.
-        return None
+        # the PETSCII_GRAPHICS capability declaration. Not a SILENT no-op
+        # though -- that was indistinguishable from the "View Image(s)"
+        # keypress just not working at all, a real live-reported bug
+        # (2026-08-10). notify() instead so the user gets an actual answer.
+        self.notify("Images aren't supported in this PETSCII display yet.", severity="information")
 
     def notify(self, message: str, severity: str = "information") -> None:
         color = {"error": pc.RED, "warning": pc.YELLOW}.get(severity, pc.WHITE)
