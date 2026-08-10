@@ -41,6 +41,28 @@ def sgr(*codes: int) -> str:
     return f"{CSI}{';'.join(str(c) for c in codes)}m"
 
 
+# The screen's persistent "base" state (navy background, white text) — real,
+# live-reported bug (2026-08-10): NAVY_BG was defined above but never
+# actually emitted anywhere in renderer.py, so the screen just showed
+# whatever the caller's own terminal default background was, not the
+# intended retro navy. Two things had to change together to fix this, not
+# just "emit it once": (1) _header() emits BASE_SGR before CLEAR_SCREEN, so
+# the freshly-erased area actually gets painted with navy -- a real
+# terminal fills an erased region using whatever background is CURRENTLY
+# ACTIVE at the moment of the erase, not some later color; (2) colored()
+# below now returns to BASE_SGR instead of doing a hard RESET after each
+# span -- a hard 0m reset would drop back to the terminal's own default
+# background (usually black) for everything from that point on, since SGR
+# state persists until explicitly changed, leaving the screen looking
+# "patchy" (navy only until the very first colored label, black after).
+# RESET itself is still exported/used once, deliberately, for the door's
+# actual exit message (see renderers/ansi/app.py) — the user's own terminal
+# shouldn't stay tinted navy after they disconnect from the door.
+BASE_SGR = sgr(NAVY_BG, WHITE)
+
+
 def colored(text: str, *codes: int) -> str:
-    """Wrap `text` in the given SGR codes, resetting immediately after."""
-    return f"{sgr(*codes)}{text}{RESET}"
+    """Wrap `text` in the given SGR codes, returning to the screen's base
+    navy-background state immediately after (not a hard reset — see
+    BASE_SGR above)."""
+    return f"{sgr(*codes)}{text}{BASE_SGR}"

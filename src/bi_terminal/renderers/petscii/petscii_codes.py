@@ -17,6 +17,18 @@ single-byte control codes in CTerm's PETSCII mode"). There is also no
 absolute cursor positioning in raw PETSCII (only HOME + single-step
 movement) — renderer.py deliberately doesn't build a move(row, col)
 primitive around these; see its module docstring.
+
+No screen/border background color control code exists in this table at all
+(confirmed against sta.c64.org's full control-code list, live-checked again
+2026-08-10 in response to a "why isn't the background blue like ANSI"
+report) — only per-character FOREGROUND colors (below) plus REVERSE_ON/OFF
+to swap a character's own fg/bg. On real hardware, screen/border background
+is a POKE to a memory-mapped hardware register (53280/53281), not a byte a
+remote program can send down a serial/modem link — this is a genuine C64
+protocol limit, not a gap in this renderer. Whatever background a caller
+sees is just whatever their own terminal software (SyncTERM, etc.) already
+had set locally before connecting; this door has no way to change it.
+ansi_codes.py's NAVY_BG (SGR 44) has no PETSCII equivalent for this reason.
 """
 
 CLR = bytes([147])
