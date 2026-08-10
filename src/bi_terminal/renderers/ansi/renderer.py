@@ -34,7 +34,7 @@ from ...specs.fields import (
     TextPromptSpec,
 )
 from ..base import ImageCapability
-from .ansi_codes import CLEAR_SCREEN, CYAN, DIM, RED, WHITE, YELLOW, colored
+from .ansi_codes import BASE_SGR, CLEAR_SCREEN, CYAN, DIM, RED, WHITE, YELLOW, colored
 from .io import AnsiIO, read_line
 
 _MAX_VISIBLE_CHOICES = 15
@@ -66,6 +66,10 @@ class AnsiRenderer:
         self.io = io
 
     def _header(self, title: str) -> None:
+        # BASE_SGR before the clear, not after — a real terminal fills the
+        # freshly-erased area with whatever background is active AT THE
+        # MOMENT of the erase. See ansi_codes.py's BASE_SGR docstring.
+        self.io.write(BASE_SGR)
         self.io.write(CLEAR_SCREEN)
         self.io.write(colored(f"BinInventory -- {title}", CYAN) + "\n")
         self.io.write(colored("=" * 60, CYAN) + "\n\n")
@@ -108,6 +112,16 @@ class AnsiRenderer:
         query = ""
         highlight = 0
         scroll = 0
+        # Snap the highlight to spec.initial_value's matching choice exactly
+        # once, on the very first render pass (query=="" -> every choice
+        # matches, so its real position in `items` is findable) -- then
+        # never again, so normal up/down/typing behaves exactly as before.
+        # Without this, ComboFilterSelectField's use of this same picker
+        # (the Bin field in Edit Item) always highlighted whichever bin
+        # sorted first rather than the item's actual current bin -- a real
+        # bug where saving without deliberately re-picking the bin could
+        # silently reassign it to the wrong one. See ListPickerSpec.initial_value.
+        positioned = spec.initial_value is None
         while True:
             matches = sorted(
                 (
@@ -119,6 +133,12 @@ class AnsiRenderer:
                 key=lambda m: m[0],
             )
             items = [c for _, c in matches]
+            if not positioned:
+                for i, c in enumerate(items):
+                    if c.value == spec.initial_value:
+                        highlight = i
+                        break
+                positioned = True
             if not items:
                 highlight = 0
             elif highlight >= len(items):
@@ -260,9 +280,15 @@ class AnsiRenderer:
             # Reuses the exact same filter+arrow-select loop as a top-level
             # list picker, scoped to this field's choices — DRY, and Escape
             # here correctly cancels the whole form (CANCELLED propagates
-            # straight up), matching the documented contract.
+            # straight up), matching the documented contract. initial_value
+            # is load-bearing, not cosmetic — see ListPickerSpec.initial_value.
             return self.show_list_picker(
-                ListPickerSpec(title=f.label, prompt=f"Select {f.label}", choices=f.choices)
+                ListPickerSpec(
+                    title=f.label,
+                    prompt=f"Select {f.label}",
+                    choices=f.choices,
+                    initial_value=f.default_value,
+                )
             )
         if isinstance(f, ImageManagerField):
             n = len(f.images)

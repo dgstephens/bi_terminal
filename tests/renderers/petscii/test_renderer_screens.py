@@ -224,6 +224,38 @@ def test_form_combo_filter_select_field_reuses_list_picker():
     assert result == {"bin_id": "b1"}
 
 
+def test_form_combo_filter_select_field_preselects_current_value():
+    """Regression test for a real bug (reported live, 2026-08-10) — see
+    ansi/test_renderer_screens.py's identical test for the full story."""
+    r, out, fds = _make(RET)
+    spec = FormSpec(
+        title="F",
+        fields=[
+            ComboFilterSelectField(
+                "bin_id",
+                "Bin",
+                choices=[Choice("Shelf A", "b1"), Choice("Shelf B", "b2")],
+                default_value="b2",
+            )
+        ],
+    )
+    result = r.show_form(spec)
+    _close(fds)
+    assert result == {"bin_id": "b2"}
+
+
+def test_list_picker_initial_value_preselects_matching_choice():
+    r, out, fds = _make(RET)
+    spec = ListPickerSpec(
+        title="Items",
+        choices=[Choice("Widget", "w1"), Choice("Gadget", "g1"), Choice("Gizmo", "z1")],
+        initial_value="g1",
+    )
+    result = r.show_list_picker(spec)
+    _close(fds)
+    assert result == "g1"
+
+
 def test_form_image_manager_field_passes_through_unchanged():
     r, out, fds = _make(b"")
     spec = FormSpec(

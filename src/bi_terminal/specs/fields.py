@@ -161,6 +161,20 @@ class ListPickerSpec(ScreenSpec):
     extra_lines: List[str] = field(default_factory=list)
     """Header/banner lines shown above the list — bi_python used this for
     "No bins yet." / "No items in this bin." empty-state messaging."""
+    initial_value: Any = None
+    """When set, a renderer should highlight whichever Choice's `.value`
+    equals this on first render, instead of defaulting to the top of the
+    (fuzzy-sorted) list — added 2026-08-10 for ComboFilterSelectField's use
+    of show_list_picker as its underlying widget in the ANSI/PETSCII
+    renderers. Without this, editing an item's Bin field always highlighted
+    whichever bin sorted first, not the item's actual current bin — a real
+    bug where saving without deliberately re-picking the bin could silently
+    reassign the item. The Textual renderer doesn't need this (its combo
+    box is a bespoke widget with its own `keep_value` mechanism in
+    FormScreen._populate_combo, not built on show_list_picker at all), but
+    the field lives here since it's a generic "which choice was already
+    selected" concept any ListPickerSpec caller could use, not something
+    combo-specific."""
 
 
 @dataclass

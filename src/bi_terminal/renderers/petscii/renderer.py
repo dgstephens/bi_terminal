@@ -139,6 +139,12 @@ class PetsciiRenderer:
         query = ""
         highlight = 0
         scroll = 0
+        # See ansi/renderer.py's show_list_picker for why this exists —
+        # same bug, same fix, same shared ListPickerSpec.initial_value
+        # mechanism (ComboFilterSelectField's Bin field in Edit Item was
+        # always highlighting whichever bin sorted first, not the item's
+        # actual current bin).
+        positioned = spec.initial_value is None
         while True:
             matches = sorted(
                 (
@@ -150,6 +156,12 @@ class PetsciiRenderer:
                 key=lambda m: m[0],
             )
             items = [c for _, c in matches]
+            if not positioned:
+                for i, c in enumerate(items):
+                    if c.value == spec.initial_value:
+                        highlight = i
+                        break
+                positioned = True
             if not items:
                 highlight = 0
             elif highlight >= len(items):
@@ -298,8 +310,15 @@ class PetsciiRenderer:
             # list picker, scoped to this field's choices — matches the
             # ANSI renderer's approach exactly (DRY; Escape here correctly
             # cancels the whole form, CANCELLED propagates straight up).
+            # initial_value is load-bearing, not cosmetic — see
+            # ListPickerSpec.initial_value.
             return self.show_list_picker(
-                ListPickerSpec(title=f.label, prompt=f"Select {f.label}", choices=f.choices)
+                ListPickerSpec(
+                    title=f.label,
+                    prompt=f"Select {f.label}",
+                    choices=f.choices,
+                    initial_value=f.default_value,
+                )
             )
         if isinstance(f, ImageManagerField):
             n = len(f.images)

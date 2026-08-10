@@ -41,6 +41,23 @@ def test_image_capability_is_fixed_at_none():
     assert AnsiRenderer.image_capability == ImageCapability.NONE
 
 
+def test_header_applies_navy_background_before_clearing():
+    """Real bug, fixed 2026-08-10: NAVY_BG was defined in ansi_codes.py but
+    never actually emitted anywhere, so the screen never showed the
+    intended navy background at all. BASE_SGR must be written BEFORE
+    CLEAR_SCREEN -- a real terminal fills the erased area using whatever
+    background is active at the moment of the erase."""
+    from bi_terminal.renderers.ansi.ansi_codes import BASE_SGR, CLEAR_SCREEN
+
+    r, out, fds = _make(b"x")
+    r.show_action_menu(
+        ActionMenuSpec(title="Main", items=[ActionItem("Exit", "x", "exit")], nav_enabled=False)
+    )
+    val = out.getvalue()
+    _close(fds)
+    assert val.index(BASE_SGR) < val.index(CLEAR_SCREEN)
+
+
 # ── show_action_menu ─────────────────────────────────────────────────────
 
 
@@ -100,6 +117,20 @@ def test_action_menu_separator_does_not_crash_and_is_not_matchable():
     result = r.show_action_menu(spec)
     _close(fds)
     assert result == "exit"
+
+
+def test_action_menu_em_dash_in_title_is_sanitized():
+    """Real bug fixed 2026-08-10 -- see ansi/io.py's write()/sanitize.py.
+    Mirrors the equivalent PETSCII/ATASCII regression tests."""
+    r, out, fds = _make(b"x")
+    spec = ActionMenuSpec(
+        title="Bin Inventory — 5 items", items=[ActionItem("Exit", "x", "exit")], nav_enabled=False
+    )
+    r.show_action_menu(spec)
+    val = out.getvalue()
+    _close(fds)
+    assert "—" not in val
+    assert "-" in val
 
 
 def test_action_menu_detail_prompt_lines_are_rendered():
@@ -258,6 +289,42 @@ def test_form_combo_filter_select_field_reuses_list_picker():
     result = r.show_form(spec)
     _close(fds)
     assert result == {"bin_id": "b1"}
+
+
+def test_form_combo_filter_select_field_preselects_current_value():
+    """Regression test for a real bug (reported live, 2026-08-10): editing
+    an item whose Bin is NOT the first choice used to always highlight the
+    first bin regardless -- pressing Enter without deliberately re-picking
+    would silently reassign the item to the wrong bin. default_value="b2"
+    (the second of two choices) must be highlighted already, so a bare
+    Enter keeps the item on its actual current bin."""
+    r, out, fds = _make(b"\r")
+    spec = FormSpec(
+        title="F",
+        fields=[
+            ComboFilterSelectField(
+                "bin_id",
+                "Bin",
+                choices=[Choice("Shelf A", "b1"), Choice("Shelf B", "b2")],
+                default_value="b2",
+            )
+        ],
+    )
+    result = r.show_form(spec)
+    _close(fds)
+    assert result == {"bin_id": "b2"}
+
+
+def test_list_picker_initial_value_preselects_matching_choice():
+    r, out, fds = _make(b"\r")  # bare Enter, no navigation at all
+    spec = ListPickerSpec(
+        title="Items",
+        choices=[Choice("Widget", "w1"), Choice("Gadget", "g1"), Choice("Gizmo", "z1")],
+        initial_value="g1",
+    )
+    result = r.show_list_picker(spec)
+    _close(fds)
+    assert result == "g1"
 
 
 def test_form_image_manager_field_passes_through_unchanged():
