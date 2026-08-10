@@ -65,6 +65,36 @@ def test_login_success_reaches_main_menu_and_saves_config():
     run(_body)
 
 
+def test_login_enter_in_password_field_submits_without_ctrl_s():
+    """Real, live-reported bug (2026-08-10): "bi-terminal-textual requires
+    you to press CTRL-S to login. Pressing ENTER after typing in your
+    password should log you in." Deliberately does NOT press ctrl+s at
+    all -- the whole point is proving Enter alone, in the form's last
+    field, is now sufficient."""
+
+    async def _body():
+        client = MagicMock()
+        client.login.return_value = {"token": "tok123", "userId": "u9", "email": "a@b.com"}
+        client.get_item_count.return_value = {"number": 2}
+        cfg = _cfg_without_token()
+        app = make_app(client=client, cfg=cfg)
+        with patched_config_save():
+            async with app.run_test() as pilot:
+                await wait_for_menu_titled(pilot, "Binventory")
+                await pilot.press("l")
+                screen = await wait_for_screen_type(pilot, FormScreen)
+                fill_form_fields(screen, {"email": "a@b.com", "password": "hunter2"})
+                screen.query_one("#password").focus()
+                await pilot.pause()
+                await pilot.press("enter")
+                await wait_for_menu_titled(pilot, "Bin Inventory")
+                await pilot.press("x")
+                await wait_for_exit(app)
+        client.login.assert_called_once_with("a@b.com", "hunter2")
+
+    run(_body)
+
+
 def test_login_failure_returns_to_login_choice_not_a_crash():
     async def _body():
         client = MagicMock()

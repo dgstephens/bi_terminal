@@ -642,6 +642,25 @@ class FormScreen(Screen):
 
     # ── save / cancel ────────────────────────────────────────────────
 
+    def on_input_submitted(self, event) -> None:
+        """Enter inside the form's LAST field submits the whole form —
+        real, live-reported bug (2026-08-10): "bi-terminal-textual requires
+        you to press CTRL-S to login. Pressing ENTER after typing in your
+        password should log you in." Ctrl+S was the ONLY way to submit ANY
+        multi-field Textual form (bin/item/profile/login/signup all use
+        this same FormScreen) — a real, systemic gap, not login-specific,
+        just reported via login since that's the form Daniel actually
+        tested. Scoped deliberately narrow: only the LAST field triggers
+        submit, matching the one thing actually requested (finish typing,
+        press Enter, done) — Enter on an earlier field stays a no-op,
+        unchanged, rather than guessing at a bigger "advance focus"
+        redesign nobody asked for."""
+        if not self.spec.fields:
+            return
+        last = self.spec.fields[-1]
+        if self._focus_selector(last) == f"#{event.input.id}":
+            self.action_save()
+
     def action_save(self) -> None:
         values = {}
         for f in self.spec.fields:
