@@ -27,6 +27,19 @@ def test_write_translates_bare_newline_to_crlf():
     assert out.getvalue() == "line one\r\nline two\r\n"
 
 
+def test_write_sanitizes_em_dash():
+    """Regression test for a real, live-reported bug (2026-08-10): AnsiIO
+    had zero sanitization (unlike PETSCII/ATASCII's binary-safe IO from day
+    one), so a plain Python str containing an em dash got UTF-8-encoded by
+    the text-mode output stream and garbled on a real CP437 ANSI/BBS
+    terminal -- this exact string is the one that was actually reported."""
+    io_obj, out, fds = _make(b"")
+    io_obj.write("single line — multi-line editing not yet supported")
+    _close(fds)
+    assert out.getvalue() == "single line - multi-line editing not yet supported"
+    assert "—" not in out.getvalue()
+
+
 def test_maybe_raw_mode_is_a_noop_on_a_non_tty_fd():
     """A pipe is never a tty — this is the same code path a real Standard
     I/O door's stdin takes (already-raw byte stream, no local tty to set

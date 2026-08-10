@@ -20,6 +20,7 @@ from contextlib import contextmanager
 from typing import Any, Optional, Union
 
 from ...specs.base import CANCELLED
+from .sanitize import to_ansi_text
 
 _ARROW_KEYS = {"A": "up", "B": "down", "C": "right", "D": "left"}
 
@@ -82,6 +83,13 @@ class AnsiIO:
         self.keys = KeyReader(in_fd)
 
     def write(self, text: str) -> None:
+        # Sanitized before writing -- a real, live-reported bug (2026-08-10):
+        # a bare Python str with no sanitization means any non-ASCII
+        # character (app text does contain a few, e.g. an em dash) gets
+        # UTF-8-encoded by the underlying text stream and garbles on a real
+        # CP437 ANSI/BBS terminal. See sanitize.py's module docstring --
+        # safe to run over the whole string including embedded CSI codes.
+        text = to_ansi_text(text)
         # Translate bare \n to \r\n — raw mode gets no free NL->CRLF
         # translation from the tty driver once we're doing manual cursor
         # positioning, and a real door's output goes straight to a

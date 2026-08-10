@@ -95,3 +95,17 @@ def test_search_no_results_then_exit():
     assert exits == [True]
     assert "no results" in text.lower()
     client.search_items.assert_called_once_with("nothing")
+
+
+def test_output_never_contains_raw_utf8_em_dash():
+    """Real bug, fixed 2026-08-10: the main menu title itself
+    ("Bin Inventory — N items", specs/menus.py) contains a genuine em dash
+    -- AnsiIO had zero sanitization, so every single real session sent this
+    over the wire as 3 raw UTF-8 bytes a CP437 BBS terminal can't read.
+    Mirrors PETSCII/ATASCII's identical end-to-end regression test."""
+    client = MagicMock()
+    client.get_item_count.return_value = {"number": 5}
+    text, exits = _run(b"x", _cfg(), client)
+    assert exits == [True]
+    assert "—" not in text
+    assert "Bin Inventory" in text
