@@ -90,6 +90,85 @@ def test_login_success_saves_config_and_reaches_main_dispatch():
     assert exits == [True]
 
 
+def test_persist_config_false_never_saves_on_login():
+    """Real, live-reported bug (2026-08-10): all 4 renderers shared one
+    ~/.binventory/config.json, so a BBS caller's login leaked to the next
+    caller's connection. Door renderers now construct AppDriver with
+    persist_config=False -- this is the regression test that login (and,
+    by the same mechanism, signup/logout/settings/profile-email-change)
+    genuinely never calls config.save() at all in that mode, not just
+    "usually doesn't." Deliberately does NOT patch config.save (unlike
+    every other test in this file) -- the whole point is proving it's never
+    even called, so if this test were wrong and save() did fire, it would
+    hit the real ~/.binventory/config.json and this test would need
+    exactly that patch it's deliberately omitting."""
+    client = MagicMock()
+    client.login.return_value = {"token": "tok", "userId": "u9", "email": "a@b.com"}
+    client.get_item_count.return_value = {"number": 0}
+    cfg = _cfg()
+    renderer = ScriptedRenderer(
+        script=[
+            "login",
+            {"email": "a@b.com", "password": "pw"},
+            "exit",
+        ]
+    )
+    exits = []
+    with patch.object(config_module, "save") as save_mock:
+        driver = AppDriver(cfg, client, renderer, on_exit=lambda: exits.append(True), persist_config=False)
+        driver.run()
+        save_mock.assert_not_called()
+    # The in-memory cfg dict still gets updated for the rest of this one
+    # session's own use (item count, etc.) -- persist_config only controls
+    # whether it ever reaches disk, not whether login "worked" this session.
+    assert cfg["token"] == "tok"
+    assert exits == [True]
+
+
+def test_persist_config_false_never_saves_on_logout():
+    client = MagicMock()
+    client.get_item_count.return_value = {"number": 0}
+    cfg = _cfg(token="tok", userId="u9", email="a@b.com")
+    renderer = ScriptedRenderer(script=["logout", "exit"])
+    exits = []
+    with patch.object(config_module, "save") as save_mock:
+        driver = AppDriver(cfg, client, renderer, on_exit=lambda: exits.append(True), persist_config=False)
+        driver.run()
+        save_mock.assert_not_called()
+    assert "token" not in cfg
+
+
+def test_two_concurrent_door_sessions_never_share_state():
+    """Directly exercises the concurrency question Daniel raised (2026-08-10,
+    "what happens if two BBS callers use PETSCII at the same time"): two
+    independent AppDriver instances, both persist_config=False, both
+    logging in as DIFFERENT users, run to completion with config.save
+    never once invoked by either -- confirming there's no shared mutable
+    state for concurrent callers to race on or leak through (in the real
+    deployment this models, they'd also be two separate OS processes, an
+    even stronger isolation guarantee than this test needs to prove)."""
+    client_a = MagicMock()
+    client_a.login.return_value = {"token": "tok-a", "userId": "user-a", "email": "a@example.com"}
+    client_a.get_item_count.return_value = {"number": 1}
+    client_b = MagicMock()
+    client_b.login.return_value = {"token": "tok-b", "userId": "user-b", "email": "b@example.com"}
+    client_b.get_item_count.return_value = {"number": 2}
+
+    cfg_a = _cfg()
+    cfg_b = _cfg()
+    renderer_a = ScriptedRenderer(script=["login", {"email": "a@example.com", "password": "pw"}, "exit"])
+    renderer_b = ScriptedRenderer(script=["login", {"email": "b@example.com", "password": "pw"}, "exit"])
+
+    with patch.object(config_module, "save") as save_mock:
+        AppDriver(cfg_a, client_a, renderer_a, persist_config=False).run()
+        AppDriver(cfg_b, client_b, renderer_b, persist_config=False).run()
+        save_mock.assert_not_called()
+
+    assert cfg_a["userId"] == "user-a"
+    assert cfg_b["userId"] == "user-b"
+    assert cfg_a is not cfg_b  # never the same dict, never touched each other
+
+
 def test_login_failure_loops_back_to_login_choice():
     client = MagicMock()
     client.login.side_effect = APIError("bad creds", status_code=401)

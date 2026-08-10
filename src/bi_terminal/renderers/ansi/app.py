@@ -25,7 +25,9 @@ def _say_goodbye(io: AnsiIO) -> None:
 
 
 class AnsiApp:
-    def __init__(self, cfg: dict, client: BinInventoryAPI, io: AnsiIO) -> None:
+    def __init__(
+        self, cfg: dict, client: BinInventoryAPI, io: AnsiIO, persist_config: bool = True
+    ) -> None:
         self.io = io
         self.renderer = AnsiRenderer(io)
         self.driver = AppDriver(
@@ -33,6 +35,7 @@ class AnsiApp:
             client,
             self.renderer,
             on_exit=lambda: _say_goodbye(io),
+            persist_config=persist_config,
         )
 
     def run(self) -> None:

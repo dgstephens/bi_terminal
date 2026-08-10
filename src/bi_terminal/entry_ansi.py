@@ -4,13 +4,16 @@ Text-only ANSI door (README "Sequencing", step 4) — stdio-based (Synchronet
 "Standard" I/O door mode), no DOOR32.SYS/Socket-mode wiring yet (that's
 real, separate follow-up work — see renderers/ansi/door32.py's stub).
 
-**Known, deliberate limitation:** shares ~/.binventory/config.json with the
-Textual renderer (same login) — correct for local single-user testing
-(matches core/config.py's "shared across renderers on the same machine
-deliberately" design), but wrong for a real multi-user BBS deployment,
-where one shared login file across concurrent door sessions makes no
-sense. Per-session config is real follow-up work for the DOOR32.SYS phase,
-not solved here.
+**Fixed 2026-08-10, real live-reported bug:** this used to share
+~/.binventory/config.json with the Textual renderer (same login) -- this
+module's own docstring used to flag it as a known, deliberate limitation
+"wrong for a real multi-user BBS deployment," and it did in fact bite: one
+caller's login leaked straight to the next caller's connection. Now uses
+config.door_cfg() (never reads/writes identity, only the non-sensitive
+base_url) and AppDriver(persist_config=False) via AnsiApp, so this process
+never touches disk at all -- every connection starts logged out. See
+driver.py's AppDriver.__init__ docstring for the full design, including why
+this is also the complete answer to concurrent callers.
 """
 
 import sys
@@ -22,14 +25,11 @@ from .renderers.ansi.io import AnsiIO
 
 
 def main() -> None:
-    cfg = config.load()
-    client = BinInventoryAPI(
-        base_url=cfg.get("base_url", config.DEFAULT_URL),
-        token=cfg.get("token"),
-    )
+    cfg = config.door_cfg()
+    client = BinInventoryAPI(base_url=cfg["base_url"])
     io = AnsiIO(sys.stdin.fileno(), sys.stdout)
     with io.maybe_raw_mode():
-        AnsiApp(cfg, client, io).run()
+        AnsiApp(cfg, client, io, persist_config=False).run()
 
 
 if __name__ == "__main__":

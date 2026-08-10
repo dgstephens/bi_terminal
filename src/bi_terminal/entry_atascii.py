@@ -12,6 +12,12 @@ Real ATASCII client verification (SyncTERM/VICE/Altirra) is a real
 follow-up, not done in this increment — see renderers/atascii/README.md for
 the socat/nc bridge that makes that a zero-setup "point the client at this
 port" moment whenever a client is available.
+
+**Fixed 2026-08-10, real live-reported bug:** used to share
+~/.binventory/config.json with the Textual renderer, so one caller's login
+leaked to the next caller's connection — see entry_ansi.py's docstring and
+driver.py's AppDriver.__init__ docstring for the full story. Uses
+config.door_cfg() + AppDriver(persist_config=False) now, same fix as ANSI.
 """
 
 import sys
@@ -23,14 +29,11 @@ from .renderers.atascii.io import AtasciiIO
 
 
 def main() -> None:
-    cfg = config.load()
-    client = BinInventoryAPI(
-        base_url=cfg.get("base_url", config.DEFAULT_URL),
-        token=cfg.get("token"),
-    )
+    cfg = config.door_cfg()
+    client = BinInventoryAPI(base_url=cfg["base_url"])
     io = AtasciiIO(sys.stdin.fileno(), sys.stdout.buffer)
     with io.maybe_raw_mode():
-        AtasciiApp(cfg, client, io).run()
+        AtasciiApp(cfg, client, io, persist_config=False).run()
 
 
 if __name__ == "__main__":

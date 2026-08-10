@@ -14,7 +14,9 @@ from .renderer import PetsciiRenderer
 
 
 class PetsciiApp:
-    def __init__(self, cfg: dict, client: BinInventoryAPI, io: PetsciiIO) -> None:
+    def __init__(
+        self, cfg: dict, client: BinInventoryAPI, io: PetsciiIO, persist_config: bool = True
+    ) -> None:
         self.io = io
         self.renderer = PetsciiRenderer(io)
         self.driver = AppDriver(
@@ -22,6 +24,7 @@ class PetsciiApp:
             client,
             self.renderer,
             on_exit=lambda: io.write_text("\rGoodbye!\r"),
+            persist_config=persist_config,
         )
 
     def run(self) -> None:

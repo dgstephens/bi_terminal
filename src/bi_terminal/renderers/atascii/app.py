@@ -26,7 +26,9 @@ def _say_goodbye(io: AtasciiIO) -> None:
 
 
 class AtasciiApp:
-    def __init__(self, cfg: dict, client: BinInventoryAPI, io: AtasciiIO) -> None:
+    def __init__(
+        self, cfg: dict, client: BinInventoryAPI, io: AtasciiIO, persist_config: bool = True
+    ) -> None:
         self.io = io
         self.renderer = AtasciiRenderer(io)
         self.driver = AppDriver(
@@ -34,6 +36,7 @@ class AtasciiApp:
             client,
             self.renderer,
             on_exit=lambda: _say_goodbye(io),
+            persist_config=persist_config,
         )
 
     def run(self) -> None:

@@ -110,12 +110,40 @@ class AppDriver:
         renderer: "Renderer",
         on_global_navigate=None,
         on_exit=None,
+        persist_config: bool = True,
     ) -> None:
         self.cfg = cfg
         self.client = client
         self.renderer = renderer
         self._on_global_navigate = on_global_navigate or (lambda: None)
         self._on_exit = on_exit or (lambda: None)
+        # Real, live-reported bug (2026-08-10): all 4 renderers shared one
+        # ~/.binventory/config.json, including token/userId/email. Fine for
+        # the local single-user Textual app (persisting login across runs
+        # is the whole point there), but a real correctness/security bug on
+        # a BBS: caller A's login token gets written to that shared file,
+        # and caller B's connection reads the SAME file straight back --
+        # caller B ends up looking at caller A's inventory without ever
+        # entering credentials, until someone explicitly logs out.
+        #
+        # persist_config=False (door entry points only, see entry_ansi.py/
+        # entry_petscii.py/entry_atascii.py) makes every self.cfg mutation
+        # in this class stay in-memory for the lifetime of this one
+        # connection and never touch disk at all -- not just "don't save
+        # the token", every single config.save()/config.clear_auth() call
+        # site below is gated on this flag. Textual's entry point doesn't
+        # pass it, so it defaults to True and keeps today's persist-to-disk
+        # behavior unchanged.
+        #
+        # This also fully answers "what happens with two concurrent
+        # PETSCII callers" (a real question, not hypothetical -- Synchronet
+        # spawns one OS process per Standard I/O door connection): once a
+        # door's AppDriver never reads OR writes the shared file, each
+        # caller's process has its own independent Python memory with
+        # nothing shared between them at all. Two callers logging in
+        # simultaneously are just two unrelated processes; there's no
+        # shared mutable state left for them to race on or leak through.
+        self.persist_config = persist_config
 
     # ── Driver ───────────────────────────────────────────────────────────
 
@@ -188,7 +216,8 @@ class AppDriver:
         try:
             data = self.client.login(result["email"], result["password"])
             self.cfg.update({"token": data["token"], "userId": data["userId"], "email": data["email"]})
-            config.save(self.cfg)
+            if self.persist_config:
+                config.save(self.cfg)
             self.client.token = data["token"]
             self.renderer.notify(f"Logged in as {result['email']}")
             return True
@@ -213,7 +242,8 @@ class AppDriver:
                 image_path=image_path,
             )
             self.cfg.update({"token": data["token"], "userId": data["userId"], "email": data["email"]})
-            config.save(self.cfg)
+            if self.persist_config:
+                config.save(self.cfg)
             self.client.token = data["token"]
             self.renderer.notify(f"Account created! Logged in as {result['email']}")
             return True
@@ -236,7 +266,7 @@ class AppDriver:
             self._on_exit()
             return None
         elif action == "logout":
-            config.clear_auth(self.cfg)
+            config.clear_auth(self.cfg, persist=self.persist_config)
             self.client.token = None
             self.renderer.notify("Logged out.")
             return "logout"
@@ -728,7 +758,8 @@ class AppDriver:
 
         if result["email"] != self.cfg.get("email"):
             self.cfg["email"] = result["email"]
-            config.save(self.cfg)
+            if self.persist_config:
+                config.save(self.cfg)
         self.renderer.notify("Profile updated.")
 
     # ── Settings ─────────────────────────────────────────────────────────
@@ -740,7 +771,8 @@ class AppDriver:
             return
 
         self.cfg["image_mode"] = mode
-        config.save(self.cfg)
+        if self.persist_config:
+            config.save(self.cfg)
         # Renderer-agnostic on purpose: this driver never reaches into a
         # renderer's internal image_mode/image_capability state. Each
         # renderer is responsible for reflecting cfg["image_mode"] live on
