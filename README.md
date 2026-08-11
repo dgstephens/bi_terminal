@@ -69,8 +69,8 @@ src/bi_terminal/
     base.py     Renderer Protocol + ImageCapability enum
     textual/    the local rich TUI renderer
     ansi/       generic stdio ANSI/BBS door — text-only, working
-    petscii/    C64 door (stub until built)
-    atascii/    Atari 8-bit door (stub until built)
+    petscii/    C64 door — working, including real PETSCII-art image support
+    atascii/    Atari 8-bit door — text-only, working
   entry_*.py    console-script entry points, one per renderer
   driver.py     AppDriver — the shared flow orchestration EVERY renderer's
                 app is built from (extracted from renderers/textual/app.py
@@ -180,6 +180,45 @@ I/O layer + renderer on top. Real-client verification (SyncTERM on the Mac
 Studio, VICE on Sasquatch) for the two door renderers' Escape-byte
 assumptions remains open — not blocking, since both `nc`/`socat` bridges
 are already live-tested against real backend data.
+
+**Real live BBS testing round (2026-08-10/11), several real bugs found and
+fixed** — the doors were built and unit-tested above, but hadn't yet been
+run through an actual Synchronet BBS with a real caller connecting via
+SyncTERM until this round. That surfaced genuine bugs no amount of local
+testing had caught: a Textual CSS stylesheet that was fully written but
+never actually loaded (multi-line-looking fields, invisible-but-functional
+dropdowns), a driver-level Ctrl-S-vs-Enter submit bug affecting all 4
+renderers' search, ANSI text sent with zero sanitization (an em dash
+corrupted on a real CP437 terminal), `core/api.py` crashing the whole app
+with no internet, ANSI's navy background never actually being emitted,
+door sessions sharing one login across BBS callers (fixed: doors are now
+fully ephemeral, never touching `~/.binventory/config.json`), PETSCII
+displaying upper/lowercase reversed (a real, confirmed C64 charset quirk),
+and — the trickiest one — PETSCII cursor keys and backspace not working at
+all through a real Synchronet connection, root-caused via a careful
+one-key-at-a-time live byte capture to Synchronet itself translating
+cursor keys into a different control-byte scheme before an external
+Standard I/O door ever sees them. Full details in each fix's own commit
+message; `renderers/petscii/io.py` and `driver.py`'s docstrings carry the
+most load-bearing explanations.
+
+**PETSCII image support (2026-08-11)** — `show_image` was a deliberate
+no-op for both door renderers ("text-only" was the original scope,
+matching how every renderer shipped step-by-step). Picked up once directly
+asked "SyncTERM and Synchronet both document supporting ANSI/PETSCII
+graphics, why doesn't this door do it" — the honest answer was "not
+impossible, just not built yet," so PETSCII's got built:
+`renderers/petscii/petscii_art.py` converts a real image into a solid
+color-block mosaic (one PETSCII color per character cell via the
+REVERSE_ON+space trick — real PETSCII has no per-character background
+color at all, so that's the actual achievable fidelity, not a shortcut),
+quantized against Philip "Pepto" Timmermann's well-known measured VIC-II
+16-color palette. `image_capability` was already `PETSCII_GRAPHICS`
+(reserved from the very first increment); only `show_image` itself needed
+building. ANSI's equivalent (reusing `renderers/_shared_ansi_art.py`'s
+existing half-block conversion, already used by Textual's image mode) is
+a real, genuinely smaller follow-up — the hard part there is already
+solved, just not yet wired to raw ANSI output instead of a Rich renderable.
 
 Full design rationale (including the specific bug fixes folded into the core
 extraction — a `get_shared_bins` response-key mismatch, inconsistent 404

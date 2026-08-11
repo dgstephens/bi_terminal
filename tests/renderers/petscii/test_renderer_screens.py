@@ -1,5 +1,6 @@
 import io as pyio
 import os
+from unittest.mock import patch
 
 from bi_terminal.core.flow import GlobalNavigate
 from bi_terminal.renderers.base import ImageCapability
@@ -328,29 +329,76 @@ def test_text_prompt_distinguishes_empty_submit_from_cancel():
 # ── show_image / notify ──────────────────────────────────────────────────
 
 
-def test_show_image_renders_nothing_but_notifies_not_supported():
-    """No image rendering (despite the declared PETSCII_GRAPHICS capability
-    -- see module docstring) but NOT a silent no-op -- a real,
-    live-reported bug (2026-08-10): pressing "View Image(s)" and getting
-    zero feedback at all was indistinguishable from the keypress just not
-    working.
+def test_show_image_renders_real_petscii_art_bytes():
+    """Real image support, shipped 2026-08-11 in response to a direct
+    question ("SyncTERM/Synchronet document supporting ANSI/PETSCII
+    graphics, why doesn't this door do it") -- the honest answer was "not
+    impossible, just not built yet," so it got built. Mocks
+    image_to_petscii_bytes (a real network call otherwise) to isolate
+    show_image's own screen-flow logic from the actual PIL/requests
+    conversion, which petscii_art.py's own tests cover directly."""
+    fake_art = pc.REVERSE_ON + pc.RED + b"  " + pc.RETURN + pc.REVERSE_OFF
+    with patch(
+        "bi_terminal.renderers.petscii.renderer.image_to_petscii_bytes", return_value=fake_art
+    ):
+        r, out, fds = _make(b"x")  # any key closes a single-image view
+        result = r.show_image(["https://example.com/x.png"])
+        val = out.getvalue()
+        _close(fds)
+    assert result is None
+    assert fake_art in val
+    assert b"press any key" in val.lower()
 
-    First fix attempt (a bare notify() call) was ALSO reported still
-    broken -- the message was written but nothing paced it against the
-    very next thing the caller does (_item_detail's loop immediately
-    clears the screen again), so a real network-latency caller could never
-    actually see it. show_image() must now block on a real keypress before
-    returning -- that's what "x" in the input bytes below is standing in
-    for; without a real read_key() call in the implementation, this test
-    would leave that byte unconsumed rather than hang like a bare empty
-    pipe would."""
-    r, out, fds = _make(b"x")
-    result = r.show_image(["https://example.com/x.png"])
+
+def test_show_image_load_failure_notifies_not_a_silent_gap():
+    """image_to_petscii_bytes returning None (bad URL, network error,
+    unsupported format -- see its own docstring) must still tell the user
+    something, matching the same "never leave a silent gap" principle the
+    original not-yet-supported message was built around."""
+    with patch(
+        "bi_terminal.renderers.petscii.renderer.image_to_petscii_bytes", return_value=None
+    ):
+        r, out, fds = _make(b"x")
+        result = r.show_image(["https://example.com/broken.png"])
+        val = out.getvalue()
+        _close(fds)
+    assert result is None
+    assert b"could not load" in val.lower()
+
+
+def test_show_image_no_urls_notifies_and_returns_immediately():
+    r, out, fds = _make(b"")
+    result = r.show_image([])
     val = out.getvalue()
     _close(fds)
     assert result is None
-    assert b"aren't supported" in val.lower()
-    assert b"press any key" in val.lower()
+    assert b"no images" in val.lower()
+
+
+def test_show_image_left_right_cycles_between_multiple_images():
+    """Only reliable now that a real, live-reported cursor-key bug was
+    root-caused and fixed the same day (see io.py's PetsciiKeyReader
+    docstring) -- left/right cycling genuinely depends on that fix."""
+    calls = []
+
+    def _fake(url):
+        calls.append(url)
+        return pc.WHITE + url[-1].encode("ascii") + pc.RETURN  # last char identifies which image
+
+    with patch("bi_terminal.renderers.petscii.renderer.image_to_petscii_bytes", side_effect=_fake):
+        # right (0x06, Synchronet-translated -- see io.py) -> image B,
+        # right again -> wraps to image A, escape closes
+        r, out, fds = _make(bytes([6, 6, 0x1B]))
+        result = r.show_image(["https://example.com/a.png", "https://example.com/b.png"])
+        val = out.getvalue()
+        _close(fds)
+    assert result is None
+    assert calls == [
+        "https://example.com/a.png",
+        "https://example.com/b.png",
+        "https://example.com/a.png",
+    ]
+    assert b"l/r SWITCH" in val  # case swapped -- see sanitize.py
 
 
 def test_notify_error_uses_red_control_byte():

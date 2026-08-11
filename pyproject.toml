@@ -26,13 +26,19 @@ textual = [
     "ascii_magic>=2.3.0",
     "Pillow>=10.0.0",
 ]
-# ANSI/PETSCII/ATASCII door renderers: no extra deps decided yet. ANSI will
-# likely grow a Pillow dependency once renderers/_shared_ansi_art.py is
-# populated (image rendering, ported from the Textual renderer's ansi/ascii
-# conversion). PETSCII/ATASCII graphics conversion deps are unknown until
-# that work starts. See README "Sequencing" for build order.
+# ANSI/ATASCII door renderers: no extra deps decided yet. ANSI will likely
+# grow a Pillow dependency once renderers/_shared_ansi_art.py is populated
+# for the door too (image rendering, ported from the Textual renderer's
+# ansi/ascii conversion). ATASCII graphics conversion deps are unknown
+# until that work starts. See README "Sequencing" for build order.
 ansi = []
-petscii = []
+# PETSCII: real image support shipped 2026-08-11 (renderers/petscii/
+# petscii_art.py) -- needs Pillow for image decode/resize. requests is
+# already a base dependency (core/api.py needs it unconditionally), so it
+# isn't repeated here.
+petscii = [
+    "Pillow>=10.0.0",
+]
 atascii = []
 
 dev = [

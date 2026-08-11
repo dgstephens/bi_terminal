@@ -1,13 +1,16 @@
 """PetsciiRenderer — the Commodore 64 door renderer.
 
-image_capability is declared as PETSCII_GRAPHICS (reserved in
-renderers/base.py's enum) but show_image stays a no-op this increment —
-real hi-res/multicolor charset graphics conversion is substantial, separate
-work, explicitly out of scope for "get PETSCII screens working" (matches
-how the ANSI renderer shipped text-only first too). Worth flagging clearly
-since this is a deliberate exception to the general rule that a non-NONE
-capability implies show_image actually does something — don't assume
-otherwise from the enum value alone.
+image_capability is PETSCII_GRAPHICS and, as of 2026-08-11, show_image is a
+real implementation — see petscii_art.py for the conversion (solid
+color-block mosaic art, one PETSCII color per character cell via the
+REVERSE_ON+space trick; there's no per-character background color in real
+PETSCII, so this is the actual achievable fidelity, not a shortcut taken
+for lack of trying — see petscii_art.py's module docstring for the full
+protocol-constraint explanation). Was a deliberate no-op before this,
+matching how the ANSI renderer shipped text-only first too; picked up once
+directly asked "why can't PETSCII do images, SyncTERM/Synchronet both
+document supporting it" and the honest answer was "not impossible, just
+not built yet."
 
 40 columns, ~25 rows — narrower and shorter than a generic ANSI terminal,
 so every rendered line is truncated (not wrapped) to fit, and the
@@ -45,6 +48,7 @@ from ...specs.fields import (
 from ..base import ImageCapability
 from . import petscii_codes as pc
 from .io import PetsciiIO, read_line
+from .petscii_art import image_to_petscii_bytes
 from .sanitize import to_petscii_text
 
 _WIDTH = 39
@@ -364,26 +368,46 @@ class PetsciiRenderer:
     # ── Image / notify ───────────────────────────────────────────────────
 
     def show_image(self, urls: List[str], start_index: int = 0) -> None:
-        # See module docstring — a deliberate no-op this increment despite
-        # the PETSCII_GRAPHICS capability declaration. Not a SILENT no-op
-        # though -- that was indistinguishable from the "View Image(s)"
-        # keypress just not working at all, a real live-reported bug
-        # (2026-08-10).
-        #
-        # Fixed once already with just a notify() call, which turned out to
-        # be incomplete -- still live-reported broken ("images still do not
-        # show and there is nothing that tells an interactor why"), because
-        # notify() alone is a single line written synchronously, with
-        # NOTHING pacing it against whatever happens next: the caller
-        # (driver.py's _item_detail loop) immediately calls _menu() again,
-        # which clears the screen right away. The message could be wiped
-        # before a real, network-latency caller ever sees it, or before
-        # it's even fully transmitted. Genuinely waiting for a keypress
-        # here -- not just writing text -- is what actually pins the
-        # message on screen until the user has read it.
-        self.notify("Images aren't supported in this PETSCII display yet.", severity="information")
-        self.io.write_raw(pc.MEDIUM_GREY + _enc(_truncate("Press any key to continue...")) + b"\r")
-        self.io.read_key()
+        # Real implementation as of 2026-08-11 -- see petscii_art.py and
+        # this module's docstring. Left/Right cycle between multiple
+        # images (only reliable now that a real, live-reported cursor-key
+        # bug was root-caused and fixed the same day -- see io.py's
+        # PetsciiKeyReader docstring); Escape/Ctrl+C/Enter close. A
+        # per-image load failure (bad URL, network error, unsupported
+        # format) notifies and waits for a keypress rather than crashing
+        # or silently skipping -- same "never leave the user without an
+        # answer" principle as the earlier not-supported-yet message this
+        # replaces.
+        urls = [u for u in urls if u]
+        if not urls:
+            self.notify("No images to show.", severity="warning")
+            return
+        index = start_index if 0 <= start_index < len(urls) else 0
+        while True:
+            self.io.write_raw(pc.CLR)
+            caption = f"Image {index + 1} of {len(urls)}" if len(urls) > 1 else "Image"
+            self.io.write_raw(pc.WHITE + _enc(caption) + b"\r\r")
+            self.io.write_raw(pc.MEDIUM_GREY + _enc("Loading...") + b"\r")
+            data = image_to_petscii_bytes(urls[index])
+            self.io.write_raw(pc.CLR)
+            self.io.write_raw(pc.WHITE + _enc(caption) + b"\r\r")
+            if data is None:
+                self.io.write_raw(pc.RED + _enc("Could not load this image.") + b"\r")
+            else:
+                self.io.write_raw(data)
+            hint = "L/R switch  Esc close" if len(urls) > 1 else "Press any key to continue..."
+            self.io.write_raw(b"\r" + pc.MEDIUM_GREY + _enc(_truncate(hint)) + b"\r")
+            key = self.io.read_key()
+            if key in ("escape", "ctrl+c", "enter"):
+                return
+            if key == "left" and len(urls) > 1:
+                index = (index - 1) % len(urls)
+                continue
+            if key == "right" and len(urls) > 1:
+                index = (index + 1) % len(urls)
+                continue
+            if len(urls) == 1:
+                return  # any key closes a single-image view, matching the old "press any key" contract
 
     def notify(self, message: str, severity: str = "information") -> None:
         color = {"error": pc.RED, "warning": pc.YELLOW}.get(severity, pc.WHITE)
