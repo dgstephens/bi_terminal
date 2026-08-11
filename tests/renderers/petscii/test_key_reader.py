@@ -29,24 +29,58 @@ def test_return_is_enter():
     assert _keys(bytes([13]), 1) == ["enter"]
 
 
-def test_cursor_up():
+def test_cursor_up_raw_petscii_spec():
+    """145/17/157 (up/down/left, raw PETSCII spec) have no collision with
+    Synchronet's translated codes -- stay live as a fallback for a
+    hypothetical non-Synchronet-mediated raw PETSCII client."""
     assert _keys(bytes([145]), 1) == ["up"]
 
 
-def test_cursor_down():
+def test_cursor_down_raw_petscii_spec():
     assert _keys(bytes([17]), 1) == ["down"]
 
 
-def test_cursor_left():
+def test_cursor_left_raw_petscii_spec():
     assert _keys(bytes([157]), 1) == ["left"]
 
 
-def test_cursor_right():
-    assert _keys(bytes([29]), 1) == ["right"]
+def test_cursor_right_synchronet_translated_wins_over_raw_spec():
+    """Real, live-reported bug (2026-08-10/11), fixed via a careful
+    one-key-at-a-time live capture through a real Synchronet+SyncTERM+
+    Telnet connection: Synchronet translates cursor keys into a different
+    byte set before an external Standard I/O door ever sees them. Byte 29
+    is a genuine, confirmed collision -- raw PETSCII spec uses it for
+    "right," Synchronet's translation uses the SAME byte for "left." Since
+    every real deployment of this door runs behind Synchronet, Synchronet's
+    meaning has to win: 29 must resolve to "left," not "right" -- this is
+    the regression test for that specific, easy-to-get-backwards decision."""
+    assert _keys(bytes([29]), 1) == ["left"]
+
+
+def test_cursor_keys_synchronet_translated():
+    """The other three Synchronet-translated codes, confirmed via the same
+    live capture (down=0x0a, up=0x1e, right=0x06 -- right independently
+    confirmed twice in that capture, same byte both times). None of these
+    collide with the raw-spec fallback codes above (145/17/157)."""
+    assert _keys(bytes([10]), 1) == ["down"]
+    assert _keys(bytes([30]), 1) == ["up"]
+    assert _keys(bytes([6]), 1) == ["right"]
 
 
 def test_delete_is_backspace():
     assert _keys(bytes([20]), 1) == ["backspace"]
+
+
+def test_ascii_backspace_is_also_backspace():
+    """Real, live-reported bug (2026-08-11), confirmed via a real
+    Synchronet+SyncTERM capture: what actually arrives for backspace/delete
+    is 0x08 (ASCII backspace/Ctrl-H), not 20 (PETSCII's own documented
+    DELETE code) -- confirmed by context in the raw log (appeared exactly
+    where backspacing mid-email-address made sense), consistent across two
+    independent real sessions. Without this, backspace presses were
+    silently falling through to the plain-ASCII-decode branch and being
+    typed as a literal \\x08 character instead of deleting anything."""
+    assert _keys(bytes([8]), 1) == ["backspace"]
 
 
 def test_escape_byte():

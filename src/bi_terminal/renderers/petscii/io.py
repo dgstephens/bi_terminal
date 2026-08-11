@@ -24,10 +24,44 @@ from . import petscii_codes
 from .sanitize import to_petscii_text
 
 _CURSOR_KEYS = {
+    # Real, live-reported bug (2026-08-10/11): cursor keys didn't work
+    # through an actual Synchronet BBS connection, even though the raw
+    # PETSCII spec codes (145/17/157/29 for up/down/left/right -- confirmed
+    # against SyncTERM's own CTerm manual, and independently, a direct byte
+    # capture straight from SyncTERM to a bare nc listener with NO
+    # Synchronet in the path at all) are provably what SyncTERM sends on
+    # its own. Root cause, established via a careful one-key-at-a-time live
+    # capture through the real Synchronet+SyncTERM+Telnet path (isolating
+    # each keypress with Enter as a bracketing marker in the log to
+    # eliminate any ambiguity about which byte came from which key):
+    # Synchronet ITSELF translates cursor keys into a different set of
+    # control bytes before an external "Standard I/O" door ever sees them
+    # -- almost certainly its own internal lightbar/hotkey navigation
+    # convention, applied globally rather than only to Synchronet's own
+    # menus. Confirmed value-by-value (right arrow independently confirmed
+    # twice, same byte both times): left=0x1d, down=0x0a, up=0x1e,
+    # right=0x06.
+    #
+    # 0x1d is a real, confirmed COLLISION, not a typo: the raw spec uses it
+    # for "right," Synchronet's translation uses the exact same byte for
+    # "left." A byte can only mean one thing at runtime -- there's no
+    # signal in the stream itself to distinguish which convention is in
+    # play -- so this dict can't preserve both for that one value. Since
+    # every real deployment of this door runs behind Synchronet (that's
+    # the entire point of a BBS door), Synchronet's meaning has to win:
+    # 29 means "left" below, and raw spec's "right"=29 is deliberately
+    # unreachable dead weight, not an oversight. up/down/right have no
+    # such collision (145/17/6/10/30 are all distinct), so those three
+    # raw-spec entries stay live as a fallback for a hypothetical
+    # non-Synchronet-mediated raw PETSCII client (a real C64 dialing in
+    # directly, or different BBS software).
     145: "up",
     17: "down",
     157: "left",
-    29: "right",
+    10: "down",
+    30: "up",
+    6: "right",
+    29: "left",  # Synchronet's translated "left" -- overrides raw spec's "right"=29 above
 }
 
 # See the plan's finding #5: PETSCII's own control-code space (documented
@@ -92,7 +126,18 @@ class PetsciiKeyReader:
         if n == 13:
             self._log(n, "enter")
             return "enter"
-        if n == 20:
+        if n in (20, 8):
+            # 20 (0x14) is PETSCII's own documented DELETE code -- what this
+            # originally listened for. 8 (0x08, ASCII backspace/Ctrl-H) was
+            # added 2026-08-11 after a real live capture through an actual
+            # Synchronet BBS connection (SyncTERM, Telnet) showed THAT is
+            # what actually arrives when the caller presses backspace/delete
+            # -- confirmed by context in the raw log (appeared exactly where
+            # backspacing mid-email-address made sense), consistent across
+            # two independent real sessions. Without this, every backspace
+            # press was silently falling through to the plain-ASCII-decode
+            # branch below and being typed as a literal \x08 character
+            # instead of deleting anything.
             self._log(n, "backspace")
             return "backspace"
         if n == ESCAPE_BYTE:
