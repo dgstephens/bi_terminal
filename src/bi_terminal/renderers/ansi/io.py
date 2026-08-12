@@ -124,7 +124,14 @@ def read_line(io: AnsiIO, password: bool = False, initial: str = "") -> Union[st
     Escape returns specs.base.CANCELLED. Password mode echoes '*' instead
     of the typed character. The shared building block for every
     text-entry field across every screen type."""
-    buf = list(initial)
+    # Defense-in-depth against a real, severe crash (2026-08-12, see
+    # specs/forms.py's _txt() for the actual root cause and fix): a None
+    # `initial` here used to crash the whole door process
+    # (TypeError: 'NoneType' object is not iterable). The real fix is at
+    # the spec layer (a TextField default should never BE None reaching
+    # any renderer), but this call site is cheap to harden too, in case a
+    # future caller ever passes None directly.
+    buf = list(initial or "")
     io.write(("*" * len(buf)) if password else "".join(buf))
     while True:
         key = io.read_key()

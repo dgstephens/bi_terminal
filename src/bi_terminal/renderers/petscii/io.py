@@ -234,7 +234,13 @@ def read_line(io: PetsciiIO, password: bool = False, initial: str = "") -> Union
     PETSCII's control-code table at all and has no defined meaning there —
     a mistake caught while writing this, not copy-pasted from the ANSI
     version unchecked)."""
-    buf = list(initial)
+    # Defense-in-depth against a real, severe crash (2026-08-12, see
+    # specs/forms.py's _txt() for the actual root cause and fix): a None
+    # `initial` here would crash the whole door process the same way it
+    # did in the ANSI renderer (TypeError: 'NoneType' object is not
+    # iterable, captured live from Synchronet's own sbbs.log). The real
+    # fix is at the spec layer, but this call site is cheap to harden too.
+    buf = list(initial or "")
     io.write_text(("*" * len(buf)) if password else "".join(buf))
     while True:
         key = io.read_key()

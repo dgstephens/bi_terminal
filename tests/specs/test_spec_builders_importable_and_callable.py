@@ -55,6 +55,70 @@ def test_item_form_spec_new_and_edit():
     assert "existing_images" in field_names  # ITEM has images
 
 
+def test_item_form_spec_survives_explicit_none_fields():
+    """Real, live-reported crash (2026-08-12), captured from Synchronet's
+    own sbbs.log: editing a real item crashed the whole door process --
+    TypeError: 'NoneType' object is not iterable, in ansi/io.py's
+    read_line()'s `buf = list(initial)`. Root cause: `existing.get(key, "")`
+    only falls back to "" when the KEY IS MISSING, not when it's present
+    with an explicit None -- routine for a MongoDB-backed API's
+    never-filled-in fields (a real item's purchaseDate stored as literal
+    `null`). The existing ITEM fixture above never had this shape (its
+    optional fields are either "" or simply absent), which is exactly why
+    this slipped through -- this test's fixture has EXPLICIT Nones,
+    matching what actually crashed."""
+    item_with_nulls = {
+        "id": "i1",
+        "item": "Widget",
+        "binId": "b1",
+        "description": None,
+        "story": None,
+        "type": None,
+        "quantity": None,
+        "purchaseDate": None,
+        "purchasedFrom": None,
+        "manufacturer": None,
+        "dateOfManufacture": None,
+        "serialNumber": None,
+        "purchasePrice": None,
+        "images": [],
+    }
+    spec = forms.item_form_spec(bins=[BIN], existing=item_with_nulls)  # must not raise
+    for f in spec.fields:
+        if hasattr(f, "default"):
+            assert f.default is not None
+            assert isinstance(f.default, str)
+
+
+def test_bin_form_spec_survives_explicit_none_fields():
+    """Same bug, same fix, bin form -- see
+    test_item_form_spec_survives_explicit_none_fields for the full story.
+    sharedWith is a list field with the identical None-vs-missing bug
+    (existing.get("sharedWith", []) would have crashed " ".join(None))."""
+    bin_with_nulls = {
+        "id": "b1",
+        "binName": "Shelf A",
+        "description": None,
+        "location": None,
+        "type": None,
+        "sharedWith": None,
+        "public": None,
+    }
+    spec = forms.bin_form_spec(existing=bin_with_nulls)  # must not raise
+    for f in spec.fields:
+        if hasattr(f, "default"):
+            assert f.default is not None
+
+
+def test_profile_form_spec_survives_explicit_none_fields():
+    """Same bug, same fix, profile form."""
+    user_with_nulls = {"name": None, "email": None, "about": None, "showOnUsersPage": None}
+    spec = forms.profile_form_spec(user_with_nulls)  # must not raise
+    for f in spec.fields:
+        if hasattr(f, "default"):
+            assert f.default is not None
+
+
 def test_profile_form_spec():
     spec = forms.profile_form_spec(USER)
     assert isinstance(spec, FormSpec)

@@ -34,24 +34,45 @@ def _non_blank(label: str):
     return validator
 
 
+def _txt(value) -> str:
+    """Safe string default for a TextField/TextAreaField -- real,
+    live-reported crash (2026-08-12): `existing.get(key, "")`'s fallback
+    only applies when the KEY IS MISSING, not when it's present with an
+    explicit None (routine for a MongoDB-backed API's never-filled-in
+    fields -- e.g. a real item's purchaseDate stored as literal `null`).
+    A None default reaching a renderer's read_line()/Input crashes the
+    whole process (TypeError: 'NoneType' object is not iterable, in
+    ansi/io.py's `buf = list(initial)` -- the actual traceback this fixes,
+    captured from Synchronet's own sbbs.log). `quantity`/`purchase_price`
+    below were accidentally safe already (str(None) == "None", not a
+    crash) purely because they happened to be str()-wrapped for a
+    different reason; every other field in this module had the same
+    latent bug. Used everywhere a TextField/TextAreaField default is
+    built from a dict that might store an explicit None."""
+    return value if isinstance(value, str) else ("" if value is None else str(value))
+
+
 def bin_form_spec(existing: Optional[dict] = None) -> FormSpec:
     """bi_python's _BinFormScreen. Result dict on submit:
     {bin_name, description, location, bin_type, public, sw_emails,
      image_path, current_image}
     consumed by core.api.create_bin (no existing) / update_bin (existing)."""
     existing = existing or {}
-    sw_emails = " ".join(existing.get("sharedWith", []))
+    # existing.get("sharedWith") or [] -- not just existing.get("sharedWith", []) --
+    # same None-vs-missing distinction as _txt() below: a key present with
+    # an explicit None would otherwise crash " ".join(None).
+    sw_emails = " ".join(existing.get("sharedWith") or [])
     fields: List = [
         TextField(
             "bin_name",
             "Bin Name",
             required=True,
             validator=_non_blank("Bin Name"),
-            default=existing.get("binName", ""),
+            default=_txt(existing.get("binName")),
         ),
-        TextField("description", "Description", default=existing.get("description", "")),
-        TextField("location", "Location", default=existing.get("location", "")),
-        TextField("bin_type", "Type", default=existing.get("type", "")),
+        TextField("description", "Description", default=_txt(existing.get("description"))),
+        TextField("location", "Location", default=_txt(existing.get("location"))),
+        TextField("bin_type", "Type", default=_txt(existing.get("type"))),
         SwitchField("public", "Public", default=bool(existing.get("public"))),
         TextField("sw_emails", "Shared With (space-separated emails)", default=sw_emails),
     ]
@@ -105,7 +126,7 @@ def item_form_spec(
             "Item Name",
             required=True,
             validator=_non_blank("Item Name"),
-            default=existing.get("item", ""),
+            default=_txt(existing.get("item")),
         ),
         ComboFilterSelectField(
             "bin_id",
@@ -115,28 +136,26 @@ def item_form_spec(
             choices=choices,
             default_value=default_bin_id,
         ),
-        TextAreaField("description", "Description", default=existing.get("description", "")),
-        TextAreaField("story", "Story", default=existing.get("story", "")),
-        TextField("item_type", "Type", default=existing.get("type", "")),
-        TextField("quantity", "Quantity", default=str(existing.get("quantity", ""))),
+        TextAreaField("description", "Description", default=_txt(existing.get("description"))),
+        TextAreaField("story", "Story", default=_txt(existing.get("story"))),
+        TextField("item_type", "Type", default=_txt(existing.get("type"))),
+        TextField("quantity", "Quantity", default=_txt(existing.get("quantity"))),
         TextField(
             "purchase_date",
             "Purchase Date",
             placeholder="YYYY-MM-DD",
-            default=existing.get("purchaseDate", ""),
+            default=_txt(existing.get("purchaseDate")),
         ),
-        TextField("purchased_from", "Purchased From", default=existing.get("purchasedFrom", "")),
-        TextField("manufacturer", "Manufacturer", default=existing.get("manufacturer", "")),
+        TextField("purchased_from", "Purchased From", default=_txt(existing.get("purchasedFrom"))),
+        TextField("manufacturer", "Manufacturer", default=_txt(existing.get("manufacturer"))),
         TextField(
             "date_of_manufacture",
             "Mfg. Date",
             placeholder="YYYY-MM-DD",
-            default=existing.get("dateOfManufacture", ""),
+            default=_txt(existing.get("dateOfManufacture")),
         ),
-        TextField("serial_number", "Serial Number", default=existing.get("serialNumber", "")),
-        TextField(
-            "purchase_price", "Purchase Price", default=str(existing.get("purchasePrice", ""))
-        ),
+        TextField("serial_number", "Serial Number", default=_txt(existing.get("serialNumber"))),
+        TextField("purchase_price", "Purchase Price", default=_txt(existing.get("purchasePrice"))),
     ]
     existing_imgs = item_images(existing)
     if existing_imgs:
@@ -172,16 +191,16 @@ def profile_form_spec(user: dict) -> FormSpec:
                 "Name",
                 required=True,
                 validator=_non_blank("Name"),
-                default=user.get("name", ""),
+                default=_txt(user.get("name")),
             ),
             TextField(
                 "email",
                 "Email",
                 required=True,
                 validator=_non_blank("Email"),
-                default=user.get("email", ""),
+                default=_txt(user.get("email")),
             ),
-            TextField("about", "About", default=user.get("about", "")),
+            TextField("about", "About", default=_txt(user.get("about"))),
             SwitchField(
                 "show_on_users_page",
                 "Show on Users Page",
