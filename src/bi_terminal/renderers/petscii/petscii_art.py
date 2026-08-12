@@ -69,11 +69,35 @@ modules for one constant."""
 
 SPACE = bytes([32])
 
+# Experimental higher-detail mode (2026-08-12), added after Daniel -- who's
+# built exactly this technique before, on a monochrome 6502 computer he
+# designed himself -- asked whether PETSCII's own graphic characters could
+# add detail beyond one flat color per cell. Samples each cell at 2x
+# HORIZONTAL resolution (vertical stays 1:1 -- no vertically-split glyph
+# is confirmed yet, see petscii_codes.py's LEFT/RIGHT/LOWER_HALF_BLOCK
+# comment) and picks one of three tiers per cell based on how different
+# the two horizontal sub-pixels are:
+#   - nearly identical  -> a plain solid block (unchanged from v1)
+#   - somewhat different -> MEDIUM_SHADE (a dither pattern), hinting at
+#     texture without claiming a hard edge
+#   - very different     -> RIGHT_HALF_BLOCK, an actual edge
+# Deliberately simple for this first pass (right-side color always wins
+# when there's a real edge, no attempt to pick "the more significant"
+# side) -- the point is to see real output on a real screen and refine
+# from there, not to theorize a perfect algorithm untested. The threshold
+# values below are a reasonable starting guess, not measured -- expect to
+# retune after Daniel's first look.
+_DITHER_THRESHOLD = 2000  # squared RGB distance -- roughly ~26 per channel
+_EDGE_THRESHOLD = 8000  # roughly ~52 per channel
+
 
 def _nearest_color(rgb: Tuple[int, int, int]) -> bytes:
-    r, g, b = rgb
     best = min(_PALETTE, key=lambda entry: sum((a - c) ** 2 for a, c in zip(entry[0], rgb)))
     return best[1]
+
+
+def _rgb_distance(a: Tuple[int, int, int], b: Tuple[int, int, int]) -> int:
+    return sum((x - y) ** 2 for x, y in zip(a, b))
 
 
 def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
@@ -117,18 +141,28 @@ def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
         # rows per character row) but must be done explicitly here since a
         # PETSCII cell only ever represents ONE image sample, not two.
         h = max(1, int(w * aspect * 0.5))
-        img = img.resize((w, h))
+        # 2x horizontal sub-sampling for the tiered detail mode above --
+        # w*2 columns, same h rows.
+        img = img.resize((w * 2, h))
 
         rows = []
         current_color = None
         for y in range(h):
             row = bytearray()
             for x in range(w):
-                color = _nearest_color(img.getpixel((x, y)))
+                left = img.getpixel((x * 2, y))
+                right = img.getpixel((x * 2 + 1, y))
+                distance = _rgb_distance(left, right)
+                if distance < _DITHER_THRESHOLD:
+                    color, glyph = _nearest_color(left), SPACE
+                elif distance < _EDGE_THRESHOLD:
+                    color, glyph = _nearest_color(left), pc.MEDIUM_SHADE
+                else:
+                    color, glyph = _nearest_color(right), pc.RIGHT_HALF_BLOCK
                 if color != current_color:
                     row += color
                     current_color = color
-                row += SPACE
+                row += glyph
             row += pc.RETURN
             rows.append(bytes(row))
         return rows
