@@ -48,7 +48,7 @@ from ...specs.fields import (
 from ..base import ImageCapability
 from . import petscii_codes as pc
 from .io import PetsciiIO, read_line
-from .petscii_art import image_to_petscii_bytes
+from .petscii_art import image_to_petscii_rows
 from .sanitize import to_petscii_text
 
 _WIDTH = 39
@@ -388,13 +388,18 @@ class PetsciiRenderer:
             caption = f"Image {index + 1} of {len(urls)}" if len(urls) > 1 else "Image"
             self.io.write_raw(pc.WHITE + _enc(caption) + b"\r\r")
             self.io.write_raw(pc.MEDIUM_GREY + _enc("Loading...") + b"\r")
-            data = image_to_petscii_bytes(urls[index])
+            rows = image_to_petscii_rows(urls[index])
             self.io.write_raw(pc.CLR)
             self.io.write_raw(pc.WHITE + _enc(caption) + b"\r\r")
-            if data is None:
+            if rows is None:
                 self.io.write_raw(pc.RED + _enc("Could not load this image.") + b"\r")
             else:
-                self.io.write_raw(data)
+                # Written row-by-row with pacing, not one big burst write --
+                # see PetsciiIO.write_rows_paced's own comment for the real,
+                # live-reported bug (2026-08-12) this addresses.
+                self.io.write_raw(pc.REVERSE_ON)
+                self.io.write_rows_paced(rows)
+                self.io.write_raw(pc.REVERSE_OFF)
             hint = "L/R switch  Esc close" if len(urls) > 1 else "Press any key to continue..."
             self.io.write_raw(b"\r" + pc.MEDIUM_GREY + _enc(_truncate(hint)) + b"\r")
             key = self.io.read_key()

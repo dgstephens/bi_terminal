@@ -76,12 +76,27 @@ def _nearest_color(rgb: Tuple[int, int, int]) -> bytes:
     return best[1]
 
 
-def image_to_petscii_bytes(url: str) -> Optional[bytes]:
-    """Download *url* and return a ready-to-write PETSCII byte sequence (a
-    grid of solid-colored character cells approximating the image), or
-    None on any failure — matching _shared_ansi_art.py's
-    image_to_renderable() contract (a renderer should never crash on a
-    bad/unreachable image URL, just skip rendering it)."""
+def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
+    """Download *url* and return one bytes chunk per image row (NOT
+    including REVERSE_ON/REVERSE_OFF -- the caller wraps the whole sequence
+    in those, since bracketing a multi-write sequence is a display/pacing
+    concern, not a conversion one), or None on any failure -- matching
+    _shared_ansi_art.py's image_to_renderable() contract (a renderer
+    should never crash on a bad/unreachable image URL, just skip rendering
+    it).
+
+    Returns a LIST rather than one concatenated bytes blob (the original
+    2026-08-11 shape) as of 2026-08-12, in response to a real live report:
+    viewing an image through an actual Synchronet connection showed only
+    one row, then nothing. The generation side was independently confirmed
+    correct beforehand (a captured real image block genuinely contained 14
+    separate RETURN-terminated rows, not one) -- the leading hypothesis is
+    that writing the whole ~700-byte, many-control-code image in a single
+    burst overwhelms or races Synchronet's own real-time terminal
+    processing, unlike the naturally byte-paced serial/modem link PETSCII
+    was designed for. Returning per-row chunks lets the caller
+    (renderer.py's show_image) write and flush one row at a time instead of
+    one giant write -- see its own comment for the pacing this enables."""
     if not url:
         return None
     try:
@@ -104,18 +119,18 @@ def image_to_petscii_bytes(url: str) -> Optional[bytes]:
         h = max(1, int(w * aspect * 0.5))
         img = img.resize((w, h))
 
-        out = bytearray()
-        out += pc.REVERSE_ON
+        rows = []
         current_color = None
         for y in range(h):
+            row = bytearray()
             for x in range(w):
                 color = _nearest_color(img.getpixel((x, y)))
                 if color != current_color:
-                    out += color
+                    row += color
                     current_color = color
-                out += SPACE
-            out += pc.RETURN
-        out += pc.REVERSE_OFF
-        return bytes(out)
+                row += SPACE
+            row += pc.RETURN
+            rows.append(bytes(row))
+        return rows
     except Exception:
         return None

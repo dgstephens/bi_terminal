@@ -329,34 +329,45 @@ def test_text_prompt_distinguishes_empty_submit_from_cancel():
 # ── show_image / notify ──────────────────────────────────────────────────
 
 
-def test_show_image_renders_real_petscii_art_bytes():
+def test_show_image_renders_real_petscii_art_rows():
     """Real image support, shipped 2026-08-11 in response to a direct
     question ("SyncTERM/Synchronet document supporting ANSI/PETSCII
     graphics, why doesn't this door do it") -- the honest answer was "not
     impossible, just not built yet," so it got built. Mocks
-    image_to_petscii_bytes (a real network call otherwise) to isolate
+    image_to_petscii_rows (a real network call otherwise) to isolate
     show_image's own screen-flow logic from the actual PIL/requests
-    conversion, which petscii_art.py's own tests cover directly."""
-    fake_art = pc.REVERSE_ON + pc.RED + b"  " + pc.RETURN + pc.REVERSE_OFF
+    conversion, which petscii_art.py's own tests cover directly.
+
+    image_to_petscii_rows returns a List[bytes] (one chunk per row), not
+    one combined blob -- changed 2026-08-12 (see PetsciiIO.write_rows_paced
+    and this test's own assertions) so show_image can write/flush/pace
+    each row individually, in response to a real live report that a large
+    single burst write showed only the image's first row through an actual
+    Synchronet connection. REVERSE_ON/OFF are now show_image's own
+    responsibility (a display concern), not the converter's."""
+    fake_rows = [pc.RED + b"  " + pc.RETURN]
     with patch(
-        "bi_terminal.renderers.petscii.renderer.image_to_petscii_bytes", return_value=fake_art
+        "bi_terminal.renderers.petscii.renderer.image_to_petscii_rows", return_value=fake_rows
     ):
         r, out, fds = _make(b"x")  # any key closes a single-image view
         result = r.show_image(["https://example.com/x.png"])
         val = out.getvalue()
         _close(fds)
     assert result is None
-    assert fake_art in val
+    assert pc.REVERSE_ON in val
+    assert fake_rows[0] in val
+    assert pc.REVERSE_OFF in val
+    assert val.index(pc.REVERSE_ON) < val.index(fake_rows[0]) < val.index(pc.REVERSE_OFF)
     assert b"press any key" in val.lower()
 
 
 def test_show_image_load_failure_notifies_not_a_silent_gap():
-    """image_to_petscii_bytes returning None (bad URL, network error,
+    """image_to_petscii_rows returning None (bad URL, network error,
     unsupported format -- see its own docstring) must still tell the user
     something, matching the same "never leave a silent gap" principle the
     original not-yet-supported message was built around."""
     with patch(
-        "bi_terminal.renderers.petscii.renderer.image_to_petscii_bytes", return_value=None
+        "bi_terminal.renderers.petscii.renderer.image_to_petscii_rows", return_value=None
     ):
         r, out, fds = _make(b"x")
         result = r.show_image(["https://example.com/broken.png"])
@@ -383,9 +394,9 @@ def test_show_image_left_right_cycles_between_multiple_images():
 
     def _fake(url):
         calls.append(url)
-        return pc.WHITE + url[-1].encode("ascii") + pc.RETURN  # last char identifies which image
+        return [pc.WHITE + url[-1].encode("ascii") + pc.RETURN]  # last char identifies which image
 
-    with patch("bi_terminal.renderers.petscii.renderer.image_to_petscii_bytes", side_effect=_fake):
+    with patch("bi_terminal.renderers.petscii.renderer.image_to_petscii_rows", side_effect=_fake):
         # right (0x06, Synchronet-translated -- see io.py) -> image B,
         # right again -> wraps to image A, escape closes
         r, out, fds = _make(bytes([6, 6, 0x1B]))

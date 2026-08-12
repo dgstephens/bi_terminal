@@ -19,16 +19,18 @@ leaked to the next caller's connection — see entry_ansi.py's docstring and
 driver.py's AppDriver.__init__ docstring for the full story. Uses
 config.door_cfg() + AppDriver(persist_config=False) now, same fix as ANSI.
 
-**Diagnostic env var (2026-08-10):** set BI_TERMINAL_PETSCII_DEBUG_LOG to a
-writable file path to log every raw byte this door receives and what key
-it resolved to — added to investigate a real, live-reported bug (cursor
-keys + backspace not working through a real Synchronet BBS connection,
-despite a direct byte capture proving SyncTERM sends exactly the bytes
-this renderer's io.py already expects). Off by default; see
-renderers/petscii/io.py's PetsciiKeyReader docstring for the full story.
-Set this in the door's SCFG "Environment variable(s) to set" field (or
-Command Line, if SCFG lets you export inline) for one real BBS session,
-then read the file to see ground truth.
+**Diagnostic env var (2026-08-10, extended 2026-08-12):** set
+BI_TERMINAL_PETSCII_DEBUG_LOG to a writable file path to log every raw
+byte this door receives and what key it resolved to (originally added to
+investigate cursor keys + backspace not working through a real Synchronet
+BBS connection) -- as of 2026-08-12 the SAME log also records every
+outbound row PetsciiIO.write_rows_paced() sends, for investigating a
+different real, live-reported bug (viewing an image showed only one row,
+then nothing). Off by default; see renderers/petscii/io.py's
+PetsciiKeyReader and PetsciiIO docstrings for the full story. Set this in
+the door's SCFG "Environment variable(s) to set" field (or Command Line,
+if SCFG lets you export inline) for one real BBS session, then read the
+file to see ground truth.
 """
 
 import os
