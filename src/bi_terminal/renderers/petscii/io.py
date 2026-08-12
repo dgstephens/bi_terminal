@@ -74,6 +74,36 @@ _CURSOR_KEYS = {
 # Daniel has VICE or SyncTERM available.
 ESCAPE_BYTE = 0x1B
 
+# Telnet IAC ("Interpret As Command") handling — real, live-reported bug
+# (2026-08-12), root-caused via char_browser.py's debug log: testing
+# through SyncTERM's own "Telnet" connection type (see
+# renderers/petscii/README.md's bridge instructions) sends real Telnet
+# negotiation bytes the instant the connection opens, before any real
+# keystroke — the exact live-captured sequence was 0xff 0xfb 0x03 (IAC
+# WILL SUPPRESS-GO-AHEAD). Byte 3 happens to be this project's own
+# Ctrl+C binding, so the negotiation handshake itself was silently
+# "pressing Ctrl+C" and (in char_browser.py's run() loop) quitting the
+# tool, dropping the connection, with zero real keystrokes involved.
+#
+# This can't happen on a real Synchronet BBS connection — Synchronet
+# itself is the actual Telnet server and strips all negotiation before an
+# external Standard I/O door ever sees a byte, confirmed by every prior
+# real-BBS test session never once seeing a stray IAC-looking byte — so
+# this is purely a bare-nc-bridge testing artifact (SyncTERM's own "RAW"
+# connection type sends no negotiation at all and is the correct fix on
+# that end). Handled here too anyway, defensively: cheap, keeps every
+# future raw-bridge test immune regardless of which SyncTERM connection
+# type gets picked, and costs nothing on a real deployment where these
+# bytes should simply never arrive. Not a full Telnet implementation —
+# just enough to recognize and discard the three shapes of Telnet command
+# that could plausibly show up (WILL/WONT/DO/DONT + 1 option byte,
+# subnegotiation bracketed by IAC SB ... IAC SE, and single-byte commands
+# like NOP/AYT) rather than treating each of their bytes as a keystroke.
+IAC = 255
+_TELNET_WILL_WONT_DO_DONT = (251, 252, 253, 254)  # each followed by exactly 1 option byte
+_TELNET_SB = 250  # subnegotiation -- variable-length body, terminated by IAC SE
+_TELNET_SE = 240
+
 
 class PetsciiKeyReader:
     """Reads and normalizes one logical keypress at a time. No pushback
@@ -112,14 +142,53 @@ class PetsciiKeyReader:
         except Exception:
             pass  # a debug log must never be able to crash or block the door
 
-    def read_key(self, timeout: Optional[float] = None) -> Optional[str]:
+    def _read_one_byte(self, timeout: Optional[float]) -> Optional[bytes]:
         r, _, _ = select.select([self.fd], [], [], timeout)
         if not r:
             return None
         b = os.read(self.fd, 1)
-        if not b:
-            return None
-        n = b[0]
+        return b if b else None
+
+    def _consume_telnet_command(self) -> None:
+        """Called right after an IAC (255) byte is read -- discards the
+        rest of one Telnet negotiation command so none of its bytes get
+        misread as a keystroke. See the module-level IAC comment for why
+        this exists. Uses a bounded per-byte timeout (never indefinite) so
+        a truncated/malformed sequence can't hang the reader forever --
+        the rest of the negotiation is expected to already be sitting in
+        the same TCP burst, not trickle in slowly."""
+        cmd = self._read_one_byte(1.0)
+        if cmd is None:
+            return
+        c = cmd[0]
+        if c == IAC:
+            return  # IAC IAC -- an escaped literal 0xFF data byte, not a real key; drop it
+        if c in _TELNET_WILL_WONT_DO_DONT:
+            self._read_one_byte(1.0)  # discard the 1 option byte that follows
+            return
+        if c == _TELNET_SB:
+            prev = None
+            while True:
+                nb = self._read_one_byte(1.0)
+                if nb is None:
+                    return
+                if prev == IAC and nb[0] == _TELNET_SE:
+                    return
+                prev = nb[0]
+        # else: a single-byte Telnet command (NOP/DM/BRK/IP/AO/AYT/EC/EL/GA)
+        # -- nothing more to consume.
+
+    def read_key(self, timeout: Optional[float] = None) -> Optional[str]:
+        while True:
+            b = self._read_one_byte(timeout)
+            if b is None:
+                return None
+            n = b[0]
+            if n == IAC:
+                self._log(n, "TELNET-IAC (negotiation consumed, not a keystroke)")
+                self._consume_telnet_command()
+                continue  # go around and read the next actual byte
+            break
         if n in _CURSOR_KEYS:
             self._log(n, _CURSOR_KEYS[n])
             return _CURSOR_KEYS[n]

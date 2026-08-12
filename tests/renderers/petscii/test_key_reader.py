@@ -183,3 +183,102 @@ def test_debug_log_none_path_never_creates_a_file(tmp_path):
     would_be_log = tmp_path / "should_not_exist.log"
     assert _keys(b"b", 1) == ["b"]
     assert not would_be_log.exists()
+
+
+# ── Telnet IAC negotiation handling ─────────────────────────────────────
+# Real, live-reported bug (2026-08-12), root-caused via char_browser.py's
+# own debug log: testing through SyncTERM's "Telnet" connection type sends
+# real Telnet negotiation bytes the instant the connection opens, before
+# any real keystroke. The exact live-captured sequence was 0xff 0xfb 0x03
+# (IAC WILL SUPPRESS-GO-AHEAD) -- byte 3 happens to collide with this
+# project's own Ctrl+C binding, so the negotiation handshake itself was
+# silently "pressing Ctrl+C." See io.py's module-level IAC comment for the
+# full story, including why this can't happen on a real Synchronet
+# connection (only a bare-nc-bridge testing artifact).
+
+
+def test_telnet_will_negotiation_is_not_treated_as_keystrokes():
+    """The exact live-captured byte sequence that caused the reported bug,
+    with nothing after it -- must resolve to a clean timeout (None), NOT
+    'ctrl+c'. This is the direct regression test for the reported bug.
+    Uses a short explicit timeout (not the shared _keys() helper's 1.0s)
+    since there's genuinely nothing left to read after the sequence -- the
+    call must actually wait out the timeout, and 1.0s per test adds up."""
+    r_fd, w_fd = os.pipe()
+    try:
+        os.write(w_fd, bytes([255, 251, 3]))
+        reader = PetsciiKeyReader(r_fd)
+        assert reader.read_key(timeout=0.2) is None
+    finally:
+        os.close(r_fd)
+        os.close(w_fd)
+
+
+def test_telnet_will_negotiation_consumed_transparently_before_a_real_key():
+    """A single read_key() call must skip straight past the whole
+    negotiation sequence and return the very next real keystroke -- not
+    three separate calls each returning something, which is what produced
+    the reported "redraws 3 times" symptom."""
+    assert _keys(bytes([255, 251, 3]) + b"b", 1) == ["b"]
+
+
+def test_telnet_do_dont_wont_negotiation_also_consumed():
+    for cmd in (252, 253, 254):  # WONT, DO, DONT
+        assert _keys(bytes([255, cmd, 31]) + b"b", 1) == ["b"]
+
+
+def test_telnet_iac_iac_escaped_data_byte_is_dropped():
+    """IAC IAC is Telnet's own escape for a literal 0xFF data byte -- not
+    a real keystroke either way (0xFF isn't ASCII-decodable), so it's
+    correctly dropped rather than surfaced as anything."""
+    assert _keys(bytes([255, 255]) + b"b", 1) == ["b"]
+
+
+def test_telnet_subnegotiation_naws_is_consumed():
+    """IAC SB NAWS <4 bytes width/height> IAC SE -- a real negotiation
+    sequence a Telnet client can send unprompted (window size), bracketed
+    by IAC SE rather than a fixed length. Must be fully consumed as one
+    unit, not leak any of its bytes through as keystrokes."""
+    naws_sequence = bytes([255, 250, 31, 0, 80, 0, 24, 255, 240])
+    assert _keys(naws_sequence + b"b", 1) == ["b"]
+
+
+def test_telnet_single_byte_command_is_consumed():
+    """IAC NOP (241) -- a command with no option byte at all, the simplest
+    shape (contrast with WILL/WONT/DO/DONT, which each need exactly one
+    more byte consumed)."""
+    assert _keys(bytes([255, 241]) + b"b", 1) == ["b"]
+
+
+def test_telnet_negotiation_does_not_hang_when_truncated():
+    """A malformed/truncated sequence (IAC WILL with the connection then
+    going quiet, no option byte ever arriving) must resolve via the bounded
+    per-byte timeout inside _consume_telnet_command, not hang forever."""
+    r_fd, w_fd = os.pipe()
+    try:
+        os.write(w_fd, bytes([255, 251]))  # IAC WILL, then nothing
+        reader = PetsciiKeyReader(r_fd)
+        t0 = time.monotonic()
+        result = reader.read_key(timeout=0.2)
+        elapsed = time.monotonic() - t0
+        assert result is None
+        assert elapsed < 2.0  # bounded by _consume_telnet_command's own 1.0s ceiling
+    finally:
+        os.close(r_fd)
+        os.close(w_fd)
+
+
+def test_debug_log_records_telnet_iac_consumption(tmp_path):
+    log_path = tmp_path / "petscii_debug.log"
+    r_fd, w_fd = os.pipe()
+    try:
+        os.write(w_fd, bytes([255, 251, 3]) + b"b")
+        reader = PetsciiKeyReader(r_fd, debug_log_path=str(log_path))
+        assert reader.read_key(timeout=1.0) == "b"
+        lines = log_path.read_text().splitlines()
+        assert len(lines) == 2  # one IAC-consumed line, one for 'b'
+        assert "TELNET-IAC" in lines[0]
+        assert "raw=0x62 (98) -> 'b'" in lines[1]
+    finally:
+        os.close(r_fd)
+        os.close(w_fd)

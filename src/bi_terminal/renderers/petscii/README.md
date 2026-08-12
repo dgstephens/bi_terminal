@@ -47,8 +47,9 @@ hostname -I | awk '{print $1}'
 
 ## Point a client at it
 
-- **SyncTERM** (Mac Studio): add a new connection, telnet, host = this
-  machine's IP, port `6502`, terminal type PETSCII/CG.
+- **SyncTERM** (Mac Studio): add a new connection, connection type **RAW**
+  (not Telnet — see the "Telnet negotiation bytes" note below for why),
+  host = this machine's IP, port `6502`, terminal type PETSCII/CG.
 - **VICE** (Sasquatch, once installed): most VICE machines can dial out via
   their modem/RS-232 emulation to a `host:port`, or use VICE's own
   Ethernet/`rs232` netplay-style options if configured for direct TCP —
@@ -72,6 +73,23 @@ real Synchronet integration (SCFG door setup, DOOR32.SYS drop files), or
 anything image-related (this renderer's `show_image` is a deliberate
 no-op — see `renderer.py`'s module docstring).
 
+## Telnet negotiation bytes (use RAW, not Telnet, in SyncTERM)
+
+Real, live-reported bug (2026-08-12): SyncTERM's **Telnet** connection type
+sends real Telnet negotiation bytes (`IAC WILL SUPPRESS-GO-AHEAD` — `0xff
+0xfb 0x03` — was the exact live-captured sequence) the instant the
+connection opens, before any real keystroke. `nc` doesn't speak Telnet at
+all, so those bytes pass straight through to the door unfiltered — on a
+real Synchronet BBS connection this can't happen (Synchronet itself is the
+actual Telnet server and strips all negotiation before an external door
+ever sees a byte), so it only ever shows up in this bare-bridge testing
+setup. `renderers/petscii/io.py`'s `PetsciiKeyReader` now recognizes and
+discards Telnet's IAC command sequences defensively either way (see its
+module-level `IAC` comment), but the cleaner fix is on SyncTERM's side:
+its **RAW** connection type sends no negotiation at all and is what's
+recommended above — described in SyncTERM's own manual as "what retro BBSs
+actually support when they say telnet."
+
 ## Character browser (verifying real glyph byte values)
 
 `char_browser.py` is a separate, standalone diagnostic tool (not part of
@@ -93,8 +111,9 @@ cd /home/daniel/Binventory/bi_terminal
 nc.traditional -l -p 6503 -e scripts/run_petscii_charbrowser.sh
 ```
 
-Point SyncTERM at the same host, port `6503`, terminal type PETSCII/CG —
-same as the real door, just a different port. Page through both character
+Point SyncTERM at the same host, port `6503`, connection type **RAW** (see
+"Telnet negotiation bytes" above), terminal type PETSCII/CG — same as the
+real door, just a different port. Page through both character
 sets and note the decimal label next to any glyph that looks like a solid
 block, a half-block, a shading/dither pattern, or a quadrant piece — that's
 the ground truth `petscii_codes.py`'s `LEFT_HALF_BLOCK`/`LOWER_HALF_BLOCK`/
