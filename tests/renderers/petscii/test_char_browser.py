@@ -193,6 +193,43 @@ def test_run_uses_paced_writes_not_a_tight_unpaced_loop():
     assert len(calls[0]) > 1  # more than a single write -- the whole page body
 
 
+# ── uppercase keyboard input (real C64/SyncTERM keyboard behavior) ───────
+# Real, live-reported bug (2026-08-12), confirmed straight from the debug
+# log: a real PETSCII keyboard sends an unshifted letter key's
+# ASCII-UPPERCASE byte regardless of the currently displayed charset
+# (`raw=0x51 (81) -> 'Q'` for a physical 'q' press) -- charset only changes
+# how a byte is DRAWN, not what the keyboard sends. Every single-letter nav
+# key was only ever compared against its lowercase form, so N/B/C/Q from a
+# real keyboard never matched anything.
+
+
+def test_run_uppercase_n_advances_page():
+    io = _FakeIO(["N", "q"])
+    cb.run(io)
+    out = io.all_output()
+    assert b"PAGE 1 OF 4" in out
+    assert b"PAGE 2 OF 4" in out
+
+
+def test_run_uppercase_b_goes_back():
+    io = _FakeIO(["B", "q"])
+    cb.run(io)
+    assert b"PAGE 4 OF 4" in io.all_output()
+
+
+def test_run_uppercase_c_toggles_charset():
+    io = _FakeIO(["C", "q"])
+    cb.run(io)
+    out = io.all_output()
+    assert pc.SWITCH_TO_LOWERCASE in out
+    assert b"CHARSET 2" in out
+
+
+def test_run_uppercase_q_quits():
+    io = _FakeIO(["Q"])
+    cb.run(io)  # must return, not redraw forever
+
+
 
 
 

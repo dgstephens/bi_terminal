@@ -167,6 +167,21 @@ def run(io: PetsciiIO) -> None:
         io.write_rows_paced([line + b"\r" for line in lines])
 
         key = io.read_key()
+        # Real, live-reported bug (2026-08-12): a real PETSCII keyboard
+        # (via SyncTERM) sends an unshifted letter key's ASCII-UPPERCASE
+        # byte value regardless of which charset is currently displayed --
+        # confirmed straight from the debug log: pressing the physical 'q'
+        # key logged as `raw=0x51 (81) -> 'Q'`, not lowercase 'q'. Charset
+        # only changes how a byte gets DRAWN on screen, not what the
+        # keyboard sends for it -- same real hardware behavior this
+        # project's sanitize.py already documents for OUTPUT text, just
+        # never accounted for on the INPUT side here. Every single-letter
+        # comparison below was checking only the lowercase form, so N/B/C/Q
+        # never matched anything and just silently redrew the same page --
+        # exactly the reported symptom. show_confirm() elsewhere in this
+        # same renderer already guards against this (`key.lower() == "y"`);
+        # this loop just hadn't followed that same established pattern.
+        key = key.lower() if key else key
         if key in ("q", "escape", "ctrl+c"):
             return
         if key in ("n", "enter", "right", " "):
