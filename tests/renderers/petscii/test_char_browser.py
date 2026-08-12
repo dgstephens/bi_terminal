@@ -17,9 +17,14 @@ from bi_terminal.renderers.petscii import petscii_codes as pc
 
 
 class _FakeIO:
-    """Records every write_raw() call and replays a scripted queue of
-    read_key() return values -- enough surface for char_browser.run() to
-    drive against, without a real PetsciiIO/pty at all."""
+    """Records every write_raw()/write_rows_paced() call and replays a
+    scripted queue of read_key() return values -- enough surface for
+    char_browser.run() to drive against, without a real PetsciiIO/pty at
+    all. write_rows_paced() deliberately skips the real delay between rows
+    (see PetsciiIO.write_rows_paced) -- these tests care about WHAT gets
+    written, not the pacing itself, and a real per-row sleep would make
+    this suite slow for no benefit; the pacing behavior itself is real
+    PetsciiIO code, not re-tested here."""
 
     def __init__(self, keys):
         self._keys = list(keys)
@@ -27,6 +32,10 @@ class _FakeIO:
 
     def write_raw(self, data: bytes) -> None:
         self.writes.append(data)
+
+    def write_rows_paced(self, rows, delay=0.03) -> None:
+        for row in rows:
+            self.write_raw(row)
 
     def read_key(self, timeout=None):
         return self._keys.pop(0) if self._keys else "q"  # never hang a test
@@ -137,7 +146,54 @@ def test_render_page_rows_fits_40_column_screen():
     assert len(rows[0]) <= 40
 
 
+# ── build_page_lines() ───────────────────────────────────────────────────
+
+
+def test_build_page_lines_contains_header_glyph_rows_and_footer():
+    lines = cb.build_page_lines(0, 4, charset=1, byte_values=[65, 66, 67])
+    joined = b"\r".join(lines)
+    assert b"PETSCII CHAR BROWSER - CHARSET 1" in joined
+    assert b"PAGE 1 OF 4" in joined
+    assert b" 65:A" in joined
+    assert b"[N]EXT [B]ACK [C]HARSET [Q]UIT" in joined
+
+
+def test_build_page_lines_no_return_bytes_embedded():
+    """build_page_lines() must not embed RETURN itself -- that's the
+    caller's job (run() appends \\r per line before pacing), same
+    conversion/display split petscii_art.py's image_to_petscii_rows() uses."""
+    for line in cb.build_page_lines(0, 1, charset=1, byte_values=[65]):
+        assert pc.RETURN not in line
+
+
 # ── run() ────────────────────────────────────────────────────────────────
+
+
+def test_run_uses_paced_writes_not_a_tight_unpaced_loop():
+    """Real, live-reported bug (2026-08-12): the first version wrote every
+    line as its own immediate write_raw() in a tight loop -- Daniel's real
+    connection disconnected right after the first page rendered, before he
+    ever pressed a key. Same failure shape as the earlier PETSCII image
+    burst-write bug, same fix: route the page body through
+    write_rows_paced() instead. This asserts run() actually calls the
+    paced path, not just that the fake happens to produce equivalent
+    output -- a regression here should fail even if a future FakeIO
+    implementation changes."""
+    calls = []
+    io = _FakeIO(["q"])
+    real_paced = io.write_rows_paced
+
+    def _tracking_paced(rows, delay=0.03):
+        calls.append(list(rows))
+        real_paced(rows, delay)
+
+    io.write_rows_paced = _tracking_paced
+    cb.run(io)
+    assert len(calls) == 1  # one page body written via the paced path
+    assert len(calls[0]) > 1  # more than a single write -- the whole page body
+
+
+
 
 
 def test_run_quits_on_q():

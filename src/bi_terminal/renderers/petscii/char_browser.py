@@ -125,20 +125,46 @@ def render_page_rows(byte_values: List[int], columns: int = COLUMNS) -> List[byt
     return rows
 
 
+def build_page_lines(page_idx: int, total_pages: int, charset: int, byte_values: List[int]) -> List[bytes]:
+    """Every line of one full page (header + glyph rows + footer), NOT
+    including CLR or trailing RETURNs -- the caller adds those, same
+    "conversion doesn't own display/pacing concerns" split petscii_art.py's
+    image_to_petscii_rows() already uses. A pure function, same
+    testability reasoning as paginate()/render_page_rows()."""
+    lines = [
+        _raw(f"PETSCII CHAR BROWSER - CHARSET {charset}"),
+        _raw(f"PAGE {page_idx + 1} OF {total_pages}  ({len(PRINTABLE_CANDIDATES)} BYTES TOTAL)"),
+        b"",
+    ]
+    lines.extend(render_page_rows(byte_values))
+    lines.append(b"")
+    lines.append(_raw("[N]EXT [B]ACK [C]HARSET [Q]UIT"))
+    return lines
+
+
 def run(io: PetsciiIO) -> None:
     """The interactive browse loop. Blocking, returns when the caller quits
     (Q/Escape/Ctrl+C) -- same "run until done" shape as PetsciiApp.run(),
-    just with no AppDriver/screen-stack underneath it."""
+    just with no AppDriver/screen-stack underneath it.
+
+    Real, live-reported bug (2026-08-12): the first version of this loop
+    wrote CLR then every line as its own immediate write_raw()+flush() call
+    in a tight loop, no pacing at all -- Daniel's connection disconnected
+    immediately after the FIRST page rendered, before he ever got to press
+    a key. Exactly the same failure shape already root-caused and fixed
+    once this same day for PETSCII image display (renderer.py's
+    show_image(): a burst of many unpaced writes, each full of raw control-
+    range-adjacent bytes, overwhelms/races the connected client's terminal
+    processing) -- that fix (io.write_rows_paced(), one write+flush+small
+    delay per row) just hadn't been carried over to this newer tool yet.
+    Applying the same proven pattern here instead of re-deriving a new one."""
     pages = paginate(PRINTABLE_CANDIDATES)
     page_idx = 0
     charset = 1  # 1 = default "graphics" charset, 2 = SWITCH_TO_LOWERCASE's "text" charset
     while True:
         io.write_raw(pc.CLR)
-        io.write_raw(_raw(f"PETSCII CHAR BROWSER - CHARSET {charset}\r"))
-        io.write_raw(_raw(f"PAGE {page_idx + 1} OF {len(pages)}  ({len(PRINTABLE_CANDIDATES)} BYTES TOTAL)\r\r"))
-        for row in render_page_rows(pages[page_idx]):
-            io.write_raw(row + b"\r")
-        io.write_raw(_raw("\r[N]EXT [B]ACK [C]HARSET [Q]UIT\r"))
+        lines = build_page_lines(page_idx, len(pages), charset, pages[page_idx])
+        io.write_rows_paced([line + b"\r" for line in lines])
 
         key = io.read_key()
         if key in ("q", "escape", "ctrl+c"):
