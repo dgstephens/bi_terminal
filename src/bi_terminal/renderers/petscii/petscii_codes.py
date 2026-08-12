@@ -71,20 +71,22 @@ LIGHT_BLUE = bytes([154])
 LIGHT_GREY = bytes([155])
 
 # ── Block/shading graphic characters (2026-08-12) ──────────────────────────
-# For higher-detail image art (renderers/petscii/petscii_art.py) beyond the
-# solid-color-block "chunky pixel" v1 approach. UNLIKE every other constant
-# in this file, these are explicitly NOT independently confirmed the way
-# the rest of this table is (the module docstring's methodology) --
+# NOT CURRENTLY USED -- petscii_art.py's tiered-detail experiment that used
+# these was reverted the same day, live-reported by Daniel as looking like
+# "a black dither pattern on entire blocks of color," not a shading blend.
+# That's real, on-screen disconfirmation of at least MEDIUM_SHADE's byte
+# guess below, not just the pre-existing "unverified" caveat -- treat 166
+# as actively wrong until re-checked, not merely unconfirmed. UNLIKE every
+# other constant in this file, these were never independently confirmed the
+# way the rest of this table is (the module docstring's methodology) --
 # multiple sources (Wikipedia fetched twice, sta.c64.org fetched twice, a
 # real PETSCII-mapping Rust library's source) gave genuinely CONTRADICTORY
 # byte values for these specific glyphs, and some sources conflate C64
 # "screen codes" (direct memory POKE values) with actual PETSCII/CHR$
 # codes -- a real, known source of confusion, not sloppiness on any one
-# source's part. These values are the best-effort result of the more
-# internally-consistent of two conflicting Wikipedia reads; ground truth
-# is pending a live "character browser" tool Daniel will read off a real
-# SyncTERM screen -- update these once that's done, don't treat them as
-# settled.
+# source's part. Ground truth is pending a live "character browser" tool
+# Daniel will read off a real SyncTERM screen -- don't reuse these for any
+# new work until that's built and these are corrected against it.
 LEFT_HALF_BLOCK = bytes([161])
 LOWER_HALF_BLOCK = bytes([162])
 MEDIUM_SHADE = bytes([166])
