@@ -70,24 +70,100 @@ LIGHT_GREEN = bytes([153])
 LIGHT_BLUE = bytes([154])
 LIGHT_GREY = bytes([155])
 
-# ── Block/shading graphic characters (2026-08-12) ──────────────────────────
-# NOT CURRENTLY USED -- petscii_art.py's tiered-detail experiment that used
-# these was reverted the same day, live-reported by Daniel as looking like
-# "a black dither pattern on entire blocks of color," not a shading blend.
-# That's real, on-screen disconfirmation of at least MEDIUM_SHADE's byte
-# guess below, not just the pre-existing "unverified" caveat -- treat 166
-# as actively wrong until re-checked, not merely unconfirmed. UNLIKE every
-# other constant in this file, these were never independently confirmed the
-# way the rest of this table is (the module docstring's methodology) --
-# multiple sources (Wikipedia fetched twice, sta.c64.org fetched twice, a
-# real PETSCII-mapping Rust library's source) gave genuinely CONTRADICTORY
-# byte values for these specific glyphs, and some sources conflate C64
-# "screen codes" (direct memory POKE values) with actual PETSCII/CHR$
-# codes -- a real, known source of confusion, not sloppiness on any one
-# source's part. Ground truth is pending a live "character browser" tool
-# Daniel will read off a real SyncTERM screen -- don't reuse these for any
-# new work until that's built and these are corrected against it.
-LEFT_HALF_BLOCK = bytes([161])
-LOWER_HALF_BLOCK = bytes([162])
-MEDIUM_SHADE = bytes([166])
-RIGHT_HALF_BLOCK = bytes([167])
+# ── Block/shading graphic characters (CONFIRMED 2026-08-12) ─────────────────
+# Ground truth, not guesses: Daniel built and ran renderers/petscii/
+# char_browser.py (a diagnostic door that pages through every PETSCII byte
+# value, labeled with its decimal number) over a real SyncTERM connection
+# and hand-recorded what every graphic byte actually looks like, in
+# ~/vimwiki/Binventory/TestingPETSCIIChars.wiki. This section replaces the
+# previous guessed values, which came from contradictory secondary sources
+# (Wikipedia/sta.c64.org/a Rust PETSCII library all disagreed) and were
+# never independently confirmed -- two of the four were wrong: MEDIUM_SHADE
+# (166) is NOT a medium/uniform shade at all, it's a checkerboard dither
+# block with one corner pixel different (exactly matching Daniel's real
+# live report on the reverted tiered-detail experiment: "a black dither
+# pattern on entire blocks of color"), and RIGHT_HALF_BLOCK (167) is not a
+# half-block at all -- it's a single-pixel-wide vertical line at the far
+# right edge. LEFT_HALF_BLOCK (161) and LOWER_HALF_BLOCK (162) were the two
+# guesses that turned out correct, confirmed here rather than assumed.
+#
+# Every constant below is named for what Daniel actually saw, byte value
+# preserved from his notes. Several entries have very similar descriptions
+# (e.g. 126/166/222/230/255 are all "full block dither, one corner
+# clear/colored") -- real, plausible distinct ROM glyphs (the character ROM
+# is known to include multiple checkerboard/dither variants), not assumed
+# duplicates, so each keeps its own name with the byte value baked in
+# rather than inventing a semantic distinction that isn't actually
+# confirmed. Deliberately excludes byte values that are just ordinary
+# already-known ASCII punctuation Daniel also tested for image-art texture
+# use (40 "(", 41 ")", 60 "<", 62 ">", 64 "@", 91 "[", 93 "]") -- those need
+# no new constant, they're already producible as plain text.
+
+# Half-blocks -- the two most directly useful for "chunky pixel" mosaic
+# art, since REVERSE_ON+space already gives a full solid block.
+LEFT_HALF_BLOCK = bytes([161])  # left half colored, right half clear
+LOWER_HALF_BLOCK = bytes([162])  # top half clear, bottom half colored
+
+# Quadrant pieces -- fill exactly one quarter of the cell. The real
+# building blocks for the "2x2 sub-pixel" quadrant-matching technique
+# Daniel originally asked about; genuinely new information, not available
+# in any of the earlier guessed constants.
+QUADRANT_TOP_LEFT = bytes([190])
+QUADRANT_TOP_RIGHT = bytes([188])
+QUADRANT_BOTTOM_LEFT = bytes([187])
+QUADRANT_BOTTOM_RIGHT = bytes([172])
+QUADRANT_BOTTOM_RIGHT_255_VARIANT = bytes([236])  # "square block bottom right" -- Daniel logged this separately from 172
+QUADRANT_DIAGONAL_TL_BR = bytes([191])  # top-left AND bottom-right quadrants both colored
+
+# Dither/checkerboard blocks -- NOT a uniform medium-gray shade (that was
+# the wrong assumption behind the old MEDIUM_SHADE name); each is a full
+# block dither pattern with one specific corner pixel clear or colored.
+DITHER_BLOCK_126 = bytes([126])  # full block dither, upper left corner clear
+DITHER_BLOCK_166 = bytes([166])  # full block dither, upper left corner colored -- was wrongly named MEDIUM_SHADE
+DITHER_BLOCK_222 = bytes([222])  # full block dither, top left pixel clear
+DITHER_BLOCK_230 = bytes([230])  # full block dither, top left pixel colored
+DITHER_BLOCK_255 = bytes([255])  # full block dither, top left clear
+LEFT_HALF_DITHER = bytes([124])  # left half dither pattern
+LEFT_HALF_DITHER_220 = bytes([220])  # 1/2 dither pattern left side, top left pixel white
+BOTTOM_HALF_DITHER = bytes([168])  # top half clear, bottom half dither pattern
+BOTTOM_HALF_DITHER_BR_COLORED = bytes([232])  # 1/2 dither pattern, bottom half, bottom right colored
+
+# Thin bars/lines/quarter-bars -- edge/texture detail, thinner than a half
+# block. Useful for future finer-grained edge detection, not the primary
+# mosaic building blocks.
+THIN_BAR_TOP = bytes([163])  # 1 pixel horizontal bar across the top
+THIN_BAR_BOTTOM = bytes([164])  # 1 pixel horizontal bar across the bottom
+QUARTER_BAR_LEFT = bytes([165])  # 1/4 vertical bar far left
+THIN_BAR_RIGHT = bytes([167])  # 1 pixel vertical bar far right -- was wrongly named RIGHT_HALF_BLOCK, it's a thin line, not a half-width fill
+QUARTER_BAR_RIGHT = bytes([170])  # 1/4 vertical bar far right
+QUARTER_BAR_BOTTOM = bytes([175])  # 1/4 horizontal bar bottom
+QUARTER_BAR_TOP = bytes([183])  # 1/4 horizontal bar top
+THIN_BAR_LEFT = bytes([180])  # 1 pixel vertical bar far left
+BAR_LEFT_2PX = bytes([181])  # 2 pixel vertical bar far left
+BAR_RIGHT_2PX = bytes([182])  # 2 pixel vertical bar far right
+BAR_TOP_2PX = bytes([184])  # 2 pixel horizontal bar top
+BAR_BOTTOM_2PX = bytes([185])  # 2 pixel horizontal bar bottom
+THIN_LINE_NEAR_BOTTOM = bytes([192])  # 1 pixel horizontal line 1 pixel from bottom
+THIN_LINE_CENTER_VERTICAL = bytes([221])  # 1 pixel wide vertical line, center
+LINE_LEFT_2PX = bytes([244])  # 2 pixel vertical line left
+LINE_LEFT_3PX = bytes([245])  # 3 pixel vertical line left
+LINE_RIGHT_3PX = bytes([246])  # 3 pixel vertical line right
+LINE_TOP_1PX = bytes([247])  # 1 pixel horizontal line top
+LINE_TOP_2PX = bytes([248])  # 2 pixel horizontal line top
+LINE_BOTTOM_2PX = bytes([249])  # 2 pixel horizontal line bottom
+THIN_BAR_BOTTOM_239 = bytes([239])  # 1 pixel horizontal bar bottom
+
+# "Bar" variants of the half-blocks above -- Daniel logged these as
+# distinct entries from 161/162, description worded slightly differently
+# ("colored bar" vs "colored, ... clear") so kept separate rather than
+# assumed identical.
+LEFT_HALF_BAR = bytes([225])  # 1/2 colored bar left
+BOTTOM_HALF_BAR = bytes([226])  # 1/2 colored bar bottom
+
+# Diagonal patterns and other full-cell glyphs.
+DIAGONAL_BARS_CLEAR_LR = bytes([127])  # 4 clear diagonal bars, left to right, top to bottom
+DIAGONAL_BARS_CLEAR_RL = bytes([169])  # 4 clear diagonal bars, right to left, top to bottom
+DIAGONAL_BARS_FILLED_TL_BR = bytes([223])  # 4 black diagonal lines, top left to bottom right
+DIAGONAL_BARS_FILLED_TR_BL = bytes([233])  # 4 black diagonal lines, tip right to bottom left
+PLUS_FULL_SIZE = bytes([123])  # a plus sign, but full character height and width
+HORIZONTAL_LINE_FULL = bytes([96])  # not a dash -- a horizontal full-width line
