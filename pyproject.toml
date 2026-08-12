@@ -49,6 +49,7 @@ dev = [
 bi-terminal-textual = "bi_terminal.entry_textual:main"
 bi-terminal-ansi = "bi_terminal.entry_ansi:main"
 bi-terminal-petscii = "bi_terminal.entry_petscii:main"
+bi-terminal-petscii-charbrowser = "bi_terminal.entry_petscii_charbrowser:main"
 bi-terminal-atascii = "bi_terminal.entry_atascii:main"
 
 [tool.setuptools.packages.find]

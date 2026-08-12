@@ -71,3 +71,33 @@ Doesn't: multi-user concurrency (unless you use the `socat` variant above),
 real Synchronet integration (SCFG door setup, DOOR32.SYS drop files), or
 anything image-related (this renderer's `show_image` is a deliberate
 no-op — see `renderer.py`'s module docstring).
+
+## Character browser (verifying real glyph byte values)
+
+`char_browser.py` is a separate, standalone diagnostic tool (not part of
+the normal Binventory door at all — no login, no API, no config file
+touched) built 2026-08-12 to get real ground truth for PETSCII's
+block/shading graphic characters, after a guessed byte value shipped in an
+image-detail experiment and turned out wrong on a real screen (see the
+module's own docstring for the full story). It pages through every PETSCII
+byte value that isn't already a known control code, six per row, each
+labeled with its decimal value (e.g. `166:` followed by whatever glyph
+byte 166 actually renders as) — `[N]`ext/`[B]`ack to page, `[C]` to toggle
+between PETSCII's two character sets, `[Q]`uit.
+
+Same bridge pattern as above, just a different wrapper script and port so
+it doesn't collide with the real door bridge if both are running:
+
+```bash
+cd /home/daniel/Binventory/bi_terminal
+nc.traditional -l -p 6503 -e scripts/run_petscii_charbrowser.sh
+```
+
+Point SyncTERM at the same host, port `6503`, terminal type PETSCII/CG —
+same as the real door, just a different port. Page through both character
+sets and note the decimal label next to any glyph that looks like a solid
+block, a half-block, a shading/dither pattern, or a quadrant piece — that's
+the ground truth `petscii_codes.py`'s `LEFT_HALF_BLOCK`/`LOWER_HALF_BLOCK`/
+`MEDIUM_SHADE`/`RIGHT_HALF_BLOCK` (currently unverified guesses, flagged as
+such in that file) need to be corrected against before any future
+image-detail work reuses them.

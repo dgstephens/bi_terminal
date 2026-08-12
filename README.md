@@ -220,6 +220,24 @@ existing half-block conversion, already used by Textual's image mode) is
 a real, genuinely smaller follow-up — the hard part there is already
 solved, just not yet wired to raw ANSI output instead of a Rich renderable.
 
+**PETSCII image detail experiment, reverted, and a character browser tool
+(2026-08-12)** — tried adding a "tiered detail" mode to the image mosaic
+above (solid block / shading glyph / half-block, picked per-cell by how
+different two horizontally-sampled sub-pixels were), using guessed byte
+values for PETSCII's block/shading graphic characters that
+`petscii_codes.py` had already flagged as unverified (contradictory across
+sources). Daniel's live report — "a black dither pattern on entire blocks
+of color," not a shading blend — confirmed the guess was actually wrong,
+not just unconfirmed, so the experiment was reverted back to the flat
+solid-color mosaic. Built `renderers/petscii/char_browser.py` +
+`bi-terminal-petscii-charbrowser` in response: a standalone diagnostic door
+(no login, no API, no config file touched) that pages through every PETSCII
+byte value that isn't a known control code, labeled with its decimal
+value, over the same `nc` bridge pattern as the real door (see
+`renderers/petscii/README.md`'s "Character browser" section) — so any
+future glyph-detail work can be built on values read off a real screen
+instead of guessed from conflicting documentation.
+
 Full design rationale (including the specific bug fixes folded into the core
 extraction — a `get_shared_bins` response-key mismatch, inconsistent 404
 handling across list endpoints, a typed `ImageFileNotFoundError`, a
