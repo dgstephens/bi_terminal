@@ -101,3 +101,11 @@ the ground truth `petscii_codes.py`'s `LEFT_HALF_BLOCK`/`LOWER_HALF_BLOCK`/
 `MEDIUM_SHADE`/`RIGHT_HALF_BLOCK` (currently unverified guesses, flagged as
 such in that file) need to be corrected against before any future
 image-detail work reuses them.
+
+**Debug logging is always on for this tool** (unlike the real door's
+opt-in `BI_TERMINAL_PETSCII_DEBUG_LOG`) — every raw byte received and what
+key it resolved to, plus every outbound row, gets logged to
+`~/petscii_charbrowser_debug.log` automatically, no setup needed. Since
+this machine runs both `bi_terminal` and Synchronet, that log can just be
+read directly here after a connection attempt — no need to reconstruct or
+describe what happened from memory.
