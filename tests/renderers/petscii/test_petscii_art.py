@@ -379,14 +379,17 @@ def test_average_color_excludes_nothing_itself_caller_filters_off_pixels():
 # reasoning (color variance beats shape matching).
 
 _RED = (0x68, 0x37, 0x2B)  # exact palette RED
-_BLUE = (0x35, 0x28, 0x79)  # exact palette BLUE
+_BLUE = (0x35, 0x28, 0x79)  # exact palette BLUE -- distance to RED is 8910,
+# BELOW _DITHER_VARIANCE_THRESHOLD (40000, retuned 2026-08-13) -- no longer
+# far enough apart on its own to trigger dither. _WHITE vs _BLUE (104985)
+# is used below wherever a test needs a pair that reliably still does.
 
 
 def test_quadrant_cell_disagreeing_on_colors_use_dither_not_average():
-    glyph, reverse, color = _quadrant_cell(_RED, _BLUE, _BLACK, _BLACK)
+    glyph, reverse, color = _quadrant_cell(_WHITE, _BLUE, _BLACK, _BLACK)
     assert glyph == pc.DITHER_BLOCK_166
     assert reverse is False
-    assert color == _average_color([_RED, _BLUE])
+    assert color == _average_color([_WHITE, _BLUE])
 
 
 def test_quadrant_cell_agreeing_on_colors_do_not_trigger_dither():
@@ -413,15 +416,15 @@ def test_quadrant_cell_disagreeing_colors_override_confirmed_shape_match():
     shape glyph can only ever show ONE color, so picking one and silently
     discarding the disagreeing other would be worse than a texture that
     signals real mixed content."""
-    glyph, reverse, color = _quadrant_cell(_RED, _BLACK, _BLUE, _BLACK)
+    glyph, reverse, color = _quadrant_cell(_WHITE, _BLACK, _BLUE, _BLACK)
     assert glyph == pc.DITHER_BLOCK_166
 
 
 def test_quadrant_cell_all_four_on_disagreeing_colors_use_dither_not_solid():
-    glyph, reverse, color = _quadrant_cell(_RED, _BLUE, _RED, _BLUE)
+    glyph, reverse, color = _quadrant_cell(_WHITE, _BLUE, _WHITE, _BLUE)
     assert glyph == pc.DITHER_BLOCK_166
     assert reverse is False
-    assert color == _average_color([_RED, _BLUE, _RED, _BLUE])
+    assert color == _average_color([_WHITE, _BLUE, _WHITE, _BLUE])
 
 
 # ── Dither over-triggering fix (2026-08-13) ───────────────────────────────
@@ -466,8 +469,9 @@ def test_quadrant_cell_close_colors_across_a_real_quantization_boundary_do_not_d
 
 
 def test_quadrant_cell_genuinely_different_colors_still_dither():
-    """The other direction, still true after the fix -- a REAL color
-    transition (not just noise near a boundary) must still trigger
-    dither, same as before this fix."""
-    glyph, reverse, color = _quadrant_cell(_RED, _BLACK, _BLUE, _BLACK)
+    """The other direction, still true after the fix -- a REAL, LARGE color
+    transition (not just noise near a boundary, and not just any two
+    different palette colors -- see _DITHER_VARIANCE_THRESHOLD's 2026-08-13
+    retune) must still trigger dither."""
+    glyph, reverse, color = _quadrant_cell(_WHITE, _BLACK, _BLUE, _BLACK)
     assert glyph == pc.DITHER_BLOCK_166

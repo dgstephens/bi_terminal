@@ -218,12 +218,20 @@ def _rgb_distance(a: Tuple[int, int, int], b: Tuple[int, int, int]) -> int:
 # almost everywhere instead of just genuine edges/color transitions. A
 # squared-RGB-distance threshold on the ORIGINAL (pre-quantization) colors
 # is a much better proxy for "is this actually two different colors."
-# 4000 (~36 per channel average) is a first-pass tuned guess, not
-# independently confirmed -- picked to comfortably exceed ordinary
-# photographic noise while still catching a real transition between two
-# different palette-scale colors; expect to retune from Daniel's next live
-# look, the same iterative process this file's whole history has followed.
-_DITHER_VARIANCE_THRESHOLD = 4000
+#
+# 4000 (~36/channel) was a first-pass guess that turned out still too
+# sensitive once actually compared side-by-side (scripts/petscii_preview.py)
+# against the real kitten photo -- the checkerboard was still dominating
+# large areas. Retuned empirically 2026-08-13 by rendering the same real
+# photo at several thresholds (4000/8000/15000/25000/40000) and visually
+# comparing each: 40000 (~115/channel average) is the point where dither
+# stops being the dominant visual element and only fires for genuinely
+# extreme transitions (e.g. a bright highlight against a mid-tone), while
+# lower values still left broad checkerboard regions that read as noise
+# rather than texture. Empirically tuned against one real photo, not
+# mathematically derived -- expect to retune again as more real images get
+# tried.
+_DITHER_VARIANCE_THRESHOLD = 40000
 
 
 def _has_significant_color_variance(pixels: List[Tuple[int, int, int]]) -> bool:
