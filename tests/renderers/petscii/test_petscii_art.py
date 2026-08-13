@@ -23,7 +23,9 @@ from unittest.mock import MagicMock, patch
 from bi_terminal.renderers.petscii import petscii_codes as pc
 from bi_terminal.renderers.petscii.petscii_art import (
     GRID_WIDTH,
+    MAX_HEIGHT,
     _average_color,
+    _fit_grid_dimensions,
     _has_significant_color_variance,
     _nearest_color,
     _quadrant_cell,
@@ -90,11 +92,13 @@ def test_image_to_petscii_rows_returns_one_chunk_per_row_ending_in_return():
     burst write.
 
     Note: the fake image's own width/height only control the ASPECT RATIO
-    fed into the row-count formula (h = GRID_WIDTH * aspect * 0.5) -- the
-    actual grid is always GRID_WIDTH columns wide, real image dimensions
-    never map 1:1 to row count. A square (1:1) source image works out to
-    19 rows here; the exact number isn't the point, "more than one row
-    from a normal (non-panoramic) image" is."""
+    fed into _fit_grid_dimensions() -- real image dimensions never map 1:1
+    to row/column count, and a square (1:1) source image now letterboxes
+    (fewer than GRID_WIDTH columns, see
+    test_compute_cell_grid_letterboxes_a_near_square_image below) rather
+    than always using the full column budget. The exact numbers aren't
+    the point here, "more than one row from a normal (non-panoramic)
+    image" is."""
     mock_resp = MagicMock()
     mock_resp.content = b"fake-bytes"
     fake_img = _fake_image(width=100, height=100, color=(0, 0, 0))  # square -> aspect 1.0
@@ -148,7 +152,11 @@ def test_grid_width_fits_the_40_column_screen():
 
 
 def test_compute_cell_grid_shape_matches_declared_dimensions():
-    fake_img = _fake_image(width=100, height=100, color=(0xFF, 0xFF, 0xFF))
+    """A LANDSCAPE image (the common case) still uses the full GRID_WIDTH
+    columns -- letterboxing only kicks in for tall/portrait images where
+    the correctly-computed height would exceed MAX_HEIGHT, see
+    test_compute_cell_grid_letterboxes_a_near_square_image below."""
+    fake_img = _fake_image(width=200, height=100, color=(0xFF, 0xFF, 0xFF))  # 2:1 landscape
     w, h, grid = compute_cell_grid(fake_img)
     assert w == GRID_WIDTH
     assert len(grid) == h
@@ -162,6 +170,61 @@ def test_compute_cell_grid_cells_are_quadrant_cell_shaped_tuples():
     assert isinstance(glyph, bytes)
     assert isinstance(reverse, bool)
     assert color is None or isinstance(color, bytes)
+
+
+def test_compute_cell_grid_letterboxes_a_near_square_image():
+    """Real, live-reported finding (2026-08-13): the old height formula
+    used an incorrect "cell is 2x taller than wide" assumption -- the
+    correct C64 cell geometry (_CELL_WIDTH_TO_HEIGHT_RATIO) means a
+    square-ish photo now needs MORE rows than MAX_HEIGHT allows at full
+    GRID_WIDTH, so it correctly letterboxes (fewer columns) instead of
+    either overflowing the screen or silently reverting to the old wrong
+    ratio."""
+    fake_img = _fake_image(width=100, height=100, color=(0xFF, 0xFF, 0xFF))  # square, aspect 1.0
+    w, h, grid = compute_cell_grid(fake_img)
+    assert w < GRID_WIDTH
+    assert h == MAX_HEIGHT
+    assert len(grid) == h
+    assert all(len(row) == w for row in grid)
+
+
+# ── _fit_grid_dimensions() ─────────────────────────────────────────────────
+# Direct tests of the fit-within-bounds sizing math, independent of PIL.
+
+
+def test_fit_grid_dimensions_landscape_uses_full_width():
+    w, h = _fit_grid_dimensions(aspect=0.5)  # 2:1 landscape
+    assert w == GRID_WIDTH
+    assert h <= MAX_HEIGHT
+
+
+def test_fit_grid_dimensions_extreme_portrait_shrinks_width_not_height():
+    w, h = _fit_grid_dimensions(aspect=3.0)  # very tall photo
+    assert h == MAX_HEIGHT
+    assert w < GRID_WIDTH
+    assert w >= 1
+
+
+def test_fit_grid_dimensions_never_exceeds_bounds():
+    for aspect in (0.05, 0.3, 0.5, 0.899, 1.0, 1.5, 2.0, 5.0, 10.0):
+        w, h = _fit_grid_dimensions(aspect)
+        assert 1 <= w <= GRID_WIDTH
+        assert 1 <= h <= MAX_HEIGHT
+
+
+def test_fit_grid_dimensions_uses_correct_cell_geometry_not_old_2to1_assumption():
+    """Direct regression test for the reported bug: with the OLD (wrong)
+    0.5 multiplier, a 4:3 photo (aspect 0.75) would compute
+    h = round(38*0.75*0.5) = 14 at the full GRID_WIDTH. With the corrected
+    5/6 ratio, the real vertical resolution needed (round(38*0.75*5/6) =
+    24) actually exceeds MAX_HEIGHT -- meaning even an ordinary 4:3 photo
+    now correctly letterboxes rather than silently under-using vertical
+    resolution the way the old formula did. Either way, real usable rows
+    (MAX_HEIGHT = 20) end up strictly more than the old formula's 14."""
+    w, h = _fit_grid_dimensions(aspect=0.75)
+    assert h == MAX_HEIGHT
+    assert h > 14  # strictly more rows than the old (wrong) formula would give
+    assert w < GRID_WIDTH  # letterboxed, not stretched to the full column budget
 
 
 def test_image_to_petscii_rows_matches_compute_cell_grid_via_the_same_cells():

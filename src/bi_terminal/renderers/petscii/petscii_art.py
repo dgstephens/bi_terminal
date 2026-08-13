@@ -130,10 +130,53 @@ _PALETTE: List[Tuple[Tuple[int, int, int], bytes]] = [
 ]
 
 GRID_WIDTH = 38
-"""Leaves a 1-column margin either side of the 40-column PETSCII screen —
-matches renderer.py's own _WIDTH=39 convention (its own margin choice)
-closely enough to look consistent without needing to import across
-modules for one constant."""
+"""The MAXIMUM image width in character columns -- leaves a 1-column
+margin either side of the 40-column PETSCII screen, matching renderer.py's
+own _WIDTH=39 convention (its own margin choice) closely enough to look
+consistent without needing to import across modules for one constant. Not
+always the ACTUAL width used any more (see _fit_grid_dimensions()) -- a
+tall/portrait source image now uses fewer columns, to avoid stretching."""
+
+MAX_HEIGHT = 20
+"""The maximum image height in character rows. renderer.py's show_image()
+prints 4 lines of chrome around the image itself (caption, a blank line,
+another blank line, and the L/R-or-press-any-key hint) on a 25-row C64
+screen -- 20 leaves a small safety margin beyond the bare 21 that chrome
+math alone would allow, rather than cutting it exactly that close."""
+
+# Real, live-reported finding (2026-08-13): the row-count formula below
+# used to assume a C64 character cell is "twice as tall as wide" (a flat
+# 0.5 multiplier) -- inherited, seemingly without being re-derived,  from
+# a DIFFERENT and unrelated convention (a typical modern terminal font
+# really is close to 2:1 tall:wide; the C64 is not). The actual number,
+# worked out from the real display geometry: the C64's highest-resolution
+# mode is a 320x200 pixel grid stretched across a 4:3 TV picture, so one
+# PIXEL's own physical aspect ratio is (4/320) / (3/200) = 5/6 -- meaning
+# a pixel (and therefore an 8x8-pixel character cell, since that scales
+# uniformly) is only mildly TALLER than wide, not twice as tall. Using 0.5
+# instead of the correct 5/6 meant every image was rendered using roughly
+# 40% less vertical resolution than the screen could actually support.
+_CELL_WIDTH_TO_HEIGHT_RATIO = 5 / 6
+
+
+def _fit_grid_dimensions(aspect: float) -> Tuple[int, int]:
+    """Fit-within-bounds sizing (the same idea as CSS `object-fit:
+    contain`): picks (w, h) that best preserves *aspect* (a source image's
+    height/width ratio) within GRID_WIDTH x MAX_HEIGHT, using the C64's
+    real cell geometry (_CELL_WIDTH_TO_HEIGHT_RATIO) rather than always
+    using the full column budget regardless of the source image's shape.
+    A landscape photo (the common case) still uses the full GRID_WIDTH
+    columns, same as before this fix. A tall/portrait photo, or any photo
+    where the mathematically correct height would exceed MAX_HEIGHT,
+    instead shrinks the WIDTH to match -- letterboxing narrower than the
+    full screen rather than either stretching the image or silently
+    cropping/exceeding the screen's real row budget."""
+    h = max(1, round(GRID_WIDTH * aspect * _CELL_WIDTH_TO_HEIGHT_RATIO))
+    if h <= MAX_HEIGHT:
+        return GRID_WIDTH, h
+    w = max(1, round(MAX_HEIGHT / (aspect * _CELL_WIDTH_TO_HEIGHT_RATIO)))
+    return min(w, GRID_WIDTH), MAX_HEIGHT
+
 
 SPACE = bytes([32])
 
@@ -264,20 +307,8 @@ def compute_cell_grid(img) -> Tuple[int, int, List[List[Tuple[bytes, bool, Optio
     Returns (w, h, grid) where grid[y][x] is this cell's
     (glyph, reverse, color) from _quadrant_cell() -- the same three-tuple
     shape, just organized as a 2D grid instead of an encoded byte stream."""
-    w = GRID_WIDTH
     aspect = img.height / img.width
-    # Terminal character cells are roughly twice as tall as they are
-    # wide (matches the C64's own 8x8 cell on a 320x200-over-4:3
-    # display) -- halving the naive aspect-derived row count corrects
-    # for that. This formula is UNCHANGED from v1 despite now sampling
-    # a 2x2 sub-pixel grid per cell instead of one sample per cell: each
-    # sub-pixel inherits the same ~1:2 width:height proportions as the
-    # whole cell (a cell split into 2x2 sub-regions keeps that same
-    # aspect at the sub-region level), so the correction factor that
-    # applied to the whole sample grid before still applies the same
-    # way now -- only the SAMPLING resolution changes (w*2 x h*2
-    # instead of w x h), not this row-count formula.
-    h = max(1, int(w * aspect * 0.5))
+    w, h = _fit_grid_dimensions(aspect)
     img = img.resize((w * 2, h * 2))
 
     grid = []
