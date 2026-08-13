@@ -24,6 +24,7 @@ from bi_terminal.renderers.petscii import petscii_codes as pc
 from bi_terminal.renderers.petscii.petscii_art import (
     GRID_WIDTH,
     _average_color,
+    _has_significant_color_variance,
     _nearest_color,
     _quadrant_cell,
     image_to_petscii_rows,
@@ -317,3 +318,52 @@ def test_quadrant_cell_all_four_on_disagreeing_colors_use_dither_not_solid():
     assert glyph == pc.DITHER_BLOCK_166
     assert reverse is False
     assert color == _average_color([_RED, _BLUE, _RED, _BLUE])
+
+
+# ── Dither over-triggering fix (2026-08-13) ───────────────────────────────
+# Real, live-reported bug the SAME day dither first shipped: comparing
+# QUANTIZED colors ("do these on-pixels round to two different palette
+# entries at all") fired dither on ordinary photographic noise that
+# happened to cross a palette-quantization boundary, not just genuine
+# color transitions -- Daniel, looking at a real photo through the real
+# door: "it's definitely got a lot of dithering going on. I think too
+# much, really." Fixed by comparing actual RGB distance instead.
+
+
+def test_has_significant_color_variance_close_colors_false():
+    assert _has_significant_color_variance([(100, 100, 100), (105, 105, 105)]) is False
+
+
+def test_has_significant_color_variance_far_colors_true():
+    assert _has_significant_color_variance([(0, 0, 0), (255, 255, 255)]) is True
+
+
+def test_has_significant_color_variance_single_pixel_is_trivially_false():
+    assert _has_significant_color_variance([(255, 0, 0)]) is False
+
+
+def test_quadrant_cell_close_colors_across_a_real_quantization_boundary_do_not_dither():
+    """The direct regression test for the reported bug: two colors just
+    1 unit per channel apart (squared distance 3 -- ordinary photographic
+    noise) that happen to straddle a REAL quantization boundary (one
+    quantizes to WHITE, the other to LIGHT_GREEN, confirmed empirically
+    against the actual palette) must NOT trigger dither -- they're
+    visually indistinguishable, not a real color transition."""
+    from bi_terminal.renderers.petscii.petscii_art import SPACE
+
+    near_white = (205, 205, 205)  # quantizes to WHITE
+    near_light_green = (204, 204, 204)  # quantizes to LIGHT_GREEN -- 1 unit away
+    assert _nearest_color(near_white) == pc.WHITE
+    assert _nearest_color(near_light_green) == pc.LIGHT_GREEN
+
+    glyph, reverse, color = _quadrant_cell(near_white, _BLACK, near_light_green, _BLACK)
+    assert glyph != pc.DITHER_BLOCK_166
+    assert glyph == pc.LEFT_HALF_BLOCK  # falls through to normal shape matching instead
+
+
+def test_quadrant_cell_genuinely_different_colors_still_dither():
+    """The other direction, still true after the fix -- a REAL color
+    transition (not just noise near a boundary) must still trigger
+    dither, same as before this fix."""
+    glyph, reverse, color = _quadrant_cell(_RED, _BLACK, _BLUE, _BLACK)
+    assert glyph == pc.DITHER_BLOCK_166

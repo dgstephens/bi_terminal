@@ -61,19 +61,24 @@ match, and which have to round up to a plain solid block instead, is a
 direct, honest consequence of what's actually confirmed to exist in
 PETSCII's character ROM (petscii_codes.py's CONFIRMED section) — not an
 implementation gap. Checked BEFORE any of this, though: if the "on"
-sub-pixels don't all agree on color (real color variance, e.g. fur vs.
-background, not just a shape edge against black), a dither/checkerboard
-glyph is used instead of any shape match — added 2026-08-13 after Daniel
-live-noticed "no dithered blocks" ever appeared despite the confirmed
-DITHER_BLOCK_* constants existing; they'd been transcribed into
-petscii_codes.py but never actually wired into this decision logic until
-now. Color variance takes priority over shape matching because a shape
-glyph can only ever show ONE color anyway, so picking one and silently
-discarding the other(s) is worse than a texture that at least signals
-"mixed content here."
+sub-pixels show SIGNIFICANT real color variance (squared RGB distance
+above _DITHER_VARIANCE_THRESHOLD, e.g. fur vs. background, not just a
+shape edge against black), a dither/checkerboard glyph is used instead of
+any shape match — added 2026-08-13 after Daniel live-noticed "no dithered
+blocks" ever appeared despite the confirmed DITHER_BLOCK_* constants
+existing (they'd been transcribed into petscii_codes.py but never
+actually wired into this decision logic), then retuned the same day after
+the first version over-corrected: comparing QUANTIZED colors instead of
+actual RGB distance fired dither on ordinary photographic noise that
+happened to cross a palette-quantization boundary, not just real color
+transitions — "a lot of dithering going on... too much, really." Color
+variance takes priority over shape matching because a shape glyph can
+only ever show ONE color anyway, so picking one and silently discarding
+the other(s) is worse than a texture that at least signals "mixed content
+here."
   - 0 on  -> plain space (shows background)
-  - on sub-pixels disagree on color -> a dither glyph (color variance
-             beats shape matching, checked first)
+  - on sub-pixels show significant real color variance -> a dither glyph
+             (color variance beats shape matching, checked first)
   - 1 on  -> the matching QUADRANT_* corner glyph (all 4 confirmed)
   - 2 on  -> LEFT_HALF_BLOCK / LOWER_HALF_BLOCK / QUADRANT_DIAGONAL_TL_BR
              for the 3 of 6 possible two-corner combinations Daniel's real
@@ -154,6 +159,38 @@ def _nearest_color(rgb: Tuple[int, int, int]) -> bytes:
     return best[1]
 
 
+def _rgb_distance(a: Tuple[int, int, int], b: Tuple[int, int, int]) -> int:
+    return sum((x - y) ** 2 for x, y in zip(a, b))
+
+
+# Real, live-reported bug (2026-08-13): comparing a real reference PETSCII
+# conversion of the same photo against our own output, Daniel confirmed
+# "it's definitely got a lot of dithering going on. I think too much,
+# really." Root cause: dithering was triggered by comparing QUANTIZED
+# colors ("do these on-pixels round to two different palette entries at
+# all") rather than the actual underlying RGB distance -- on a real,
+# noisy photo, two visually near-identical sub-pixels constantly land on
+# opposite sides of a palette quantization boundary (ordinary photographic
+# sensor/JPEG noise, not a real color difference), which fired dither
+# almost everywhere instead of just genuine edges/color transitions. A
+# squared-RGB-distance threshold on the ORIGINAL (pre-quantization) colors
+# is a much better proxy for "is this actually two different colors."
+# 4000 (~36 per channel average) is a first-pass tuned guess, not
+# independently confirmed -- picked to comfortably exceed ordinary
+# photographic noise while still catching a real transition between two
+# different palette-scale colors; expect to retune from Daniel's next live
+# look, the same iterative process this file's whole history has followed.
+_DITHER_VARIANCE_THRESHOLD = 4000
+
+
+def _has_significant_color_variance(pixels: List[Tuple[int, int, int]]) -> bool:
+    for i in range(len(pixels)):
+        for j in range(i + 1, len(pixels)):
+            if _rgb_distance(pixels[i], pixels[j]) > _DITHER_VARIANCE_THRESHOLD:
+                return True
+    return False
+
+
 def _average_color(pixels: List[Tuple[int, int, int]]) -> bytes:
     n = len(pixels)
     avg = tuple(sum(p[i] for p in pixels) / n for i in range(3))
@@ -174,31 +211,35 @@ def _quadrant_cell(
     quantized = [_nearest_color(c) for c in corners]
     pattern = tuple(q != pc.BLACK for q in quantized)
     on_pixels = [c for c, on in zip(corners, pattern) if on]
-    on_quantized = [q for q, on in zip(quantized, pattern) if on]
     count = len(on_pixels)
     if count == 0:
         return SPACE, False, None
     color = _average_color(on_pixels)
-    if len(set(on_quantized)) > 1:
+    if count >= 2 and _has_significant_color_variance(on_pixels):
         # Real, live-reported observation (2026-08-13): "no dithered
         # blocks" ever appeared, because nothing in this function ever
         # selected one -- petscii_codes.py's DITHER_BLOCK_* constants were
         # transcribed from Daniel's real character-browser notes but never
-        # actually wired into this decision logic. This is the fix: when
-        # the "on" sub-pixels genuinely disagree on color (not just a
-        # shape edge against black, but two different real colors,
-        # e.g. fur vs. background), blending them into one flat average
-        # would silently hide that -- a dither texture at least signals
-        # "mixed content here" instead of asserting a single, possibly
-        # unrepresentative blended tone. Checked BEFORE the count-based
-        # shape matching below on purpose: even a pattern that WOULD have
-        # an exact confirmed shape glyph (e.g. LEFT_HALF_BLOCK) can only
-        # ever show ONE color anyway, so color variance takes priority
-        # over shape matching, not the reverse. Which of the 5 confirmed
-        # "full block dither" byte variants gets used doesn't meaningfully
-        # matter -- Daniel's notes describe them as near-identical (only
-        # which corner pixel is clear/colored differs) -- so one
-        # (DITHER_BLOCK_166) is picked consistently rather than cycled.
+        # actually wired into this decision logic. Fixed the same day, then
+        # immediately over-corrected: the first version compared QUANTIZED
+        # colors ("do these on-pixels round to two different palette
+        # entries at all"), which on a real noisy photo fired dither almost
+        # everywhere -- Daniel: "it's definitely got a lot of dithering
+        # going on. I think too much, really." Comparing actual RGB
+        # distance on the ORIGINAL colors (_has_significant_color_variance)
+        # instead means ordinary photographic noise that happens to cross a
+        # quantization boundary no longer triggers dither, only genuine
+        # color transitions do (e.g. fur vs. background, not fur vs.
+        # slightly-different-shade-of-the-same-fur). Checked BEFORE the
+        # count-based shape matching below on purpose: even a pattern that
+        # WOULD have an exact confirmed shape glyph (e.g. LEFT_HALF_BLOCK)
+        # can only ever show ONE color anyway, so real color variance takes
+        # priority over shape matching, not the reverse. Which of the 5
+        # confirmed "full block dither" byte variants gets used doesn't
+        # meaningfully matter -- Daniel's notes describe them as
+        # near-identical (only which corner pixel is clear/colored
+        # differs) -- so one (DITHER_BLOCK_166) is picked consistently
+        # rather than cycled.
         return pc.DITHER_BLOCK_166, False, color
     if count == 1:
         return _ONE_ON_GLYPHS[pattern], False, color
