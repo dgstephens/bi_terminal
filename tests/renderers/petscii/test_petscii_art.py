@@ -264,3 +264,56 @@ def test_average_color_excludes_nothing_itself_caller_filters_off_pixels():
     not here. Direct unit coverage of the averaging+quantization math."""
     assert _average_color([(0xFF, 0xFF, 0xFF), (0xFF, 0xFF, 0xFF)]) == pc.WHITE
     assert _average_color([(0x00, 0x00, 0x00)]) == pc.BLACK
+
+
+# ── Dither glyphs for disagreeing "on" colors (2026-08-13) ────────────────
+# Real, live-reported observation: "no dithered blocks" ever appeared, even
+# though DITHER_BLOCK_* constants exist in petscii_codes.py -- they were
+# transcribed from Daniel's notes but never wired into _quadrant_cell() at
+# all until now. See petscii_art.py's module docstring for the full
+# reasoning (color variance beats shape matching).
+
+_RED = (0x68, 0x37, 0x2B)  # exact palette RED
+_BLUE = (0x35, 0x28, 0x79)  # exact palette BLUE
+
+
+def test_quadrant_cell_disagreeing_on_colors_use_dither_not_average():
+    glyph, reverse, color = _quadrant_cell(_RED, _BLUE, _BLACK, _BLACK)
+    assert glyph == pc.DITHER_BLOCK_166
+    assert reverse is False
+    assert color == _average_color([_RED, _BLUE])
+
+
+def test_quadrant_cell_agreeing_on_colors_do_not_trigger_dither():
+    """Sanity check for the other direction -- two "on" corners that ARE
+    the same color must still use the normal shape match, not dither."""
+    glyph, reverse, color = _quadrant_cell(_RED, _BLACK, _RED, _BLACK)
+    assert glyph == pc.LEFT_HALF_BLOCK
+    assert glyph != pc.DITHER_BLOCK_166
+
+
+def test_quadrant_cell_single_on_pixel_never_triggers_dither():
+    """A single "on" corner is trivially color-uniform (nothing to
+    disagree with) -- must always use its confirmed corner glyph, never
+    dither, regardless of which corner."""
+    glyph, reverse, color = _quadrant_cell(_RED, _BLACK, _BLACK, _BLACK)
+    assert glyph == pc.QUADRANT_TOP_LEFT
+    assert glyph != pc.DITHER_BLOCK_166
+
+
+def test_quadrant_cell_disagreeing_colors_override_confirmed_shape_match():
+    """Color variance takes priority over shape matching, even when the
+    on-pattern WOULD otherwise have an exact confirmed glyph (here,
+    top-left + bottom-left would normally match LEFT_HALF_BLOCK) -- a
+    shape glyph can only ever show ONE color, so picking one and silently
+    discarding the disagreeing other would be worse than a texture that
+    signals real mixed content."""
+    glyph, reverse, color = _quadrant_cell(_RED, _BLACK, _BLUE, _BLACK)
+    assert glyph == pc.DITHER_BLOCK_166
+
+
+def test_quadrant_cell_all_four_on_disagreeing_colors_use_dither_not_solid():
+    glyph, reverse, color = _quadrant_cell(_RED, _BLUE, _RED, _BLUE)
+    assert glyph == pc.DITHER_BLOCK_166
+    assert reverse is False
+    assert color == _average_color([_RED, _BLUE, _RED, _BLUE])

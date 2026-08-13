@@ -60,8 +60,20 @@ Which of the 16 possible on/off patterns get an EXACT confirmed glyph
 match, and which have to round up to a plain solid block instead, is a
 direct, honest consequence of what's actually confirmed to exist in
 PETSCII's character ROM (petscii_codes.py's CONFIRMED section) — not an
-implementation gap:
+implementation gap. Checked BEFORE any of this, though: if the "on"
+sub-pixels don't all agree on color (real color variance, e.g. fur vs.
+background, not just a shape edge against black), a dither/checkerboard
+glyph is used instead of any shape match — added 2026-08-13 after Daniel
+live-noticed "no dithered blocks" ever appeared despite the confirmed
+DITHER_BLOCK_* constants existing; they'd been transcribed into
+petscii_codes.py but never actually wired into this decision logic until
+now. Color variance takes priority over shape matching because a shape
+glyph can only ever show ONE color anyway, so picking one and silently
+discarding the other(s) is worse than a texture that at least signals
+"mixed content here."
   - 0 on  -> plain space (shows background)
+  - on sub-pixels disagree on color -> a dither glyph (color variance
+             beats shape matching, checked first)
   - 1 on  -> the matching QUADRANT_* corner glyph (all 4 confirmed)
   - 2 on  -> LEFT_HALF_BLOCK / LOWER_HALF_BLOCK / QUADRANT_DIAGONAL_TL_BR
              for the 3 of 6 possible two-corner combinations Daniel's real
@@ -159,12 +171,35 @@ def _quadrant_cell(
     to draw, no color change needed) -- see this module's docstring for the
     on/off/glyph-selection rules."""
     corners = (top_left, top_right, bottom_left, bottom_right)
-    pattern = tuple(_nearest_color(c) != pc.BLACK for c in corners)
+    quantized = [_nearest_color(c) for c in corners]
+    pattern = tuple(q != pc.BLACK for q in quantized)
     on_pixels = [c for c, on in zip(corners, pattern) if on]
+    on_quantized = [q for q, on in zip(quantized, pattern) if on]
     count = len(on_pixels)
     if count == 0:
         return SPACE, False, None
     color = _average_color(on_pixels)
+    if len(set(on_quantized)) > 1:
+        # Real, live-reported observation (2026-08-13): "no dithered
+        # blocks" ever appeared, because nothing in this function ever
+        # selected one -- petscii_codes.py's DITHER_BLOCK_* constants were
+        # transcribed from Daniel's real character-browser notes but never
+        # actually wired into this decision logic. This is the fix: when
+        # the "on" sub-pixels genuinely disagree on color (not just a
+        # shape edge against black, but two different real colors,
+        # e.g. fur vs. background), blending them into one flat average
+        # would silently hide that -- a dither texture at least signals
+        # "mixed content here" instead of asserting a single, possibly
+        # unrepresentative blended tone. Checked BEFORE the count-based
+        # shape matching below on purpose: even a pattern that WOULD have
+        # an exact confirmed shape glyph (e.g. LEFT_HALF_BLOCK) can only
+        # ever show ONE color anyway, so color variance takes priority
+        # over shape matching, not the reverse. Which of the 5 confirmed
+        # "full block dither" byte variants gets used doesn't meaningfully
+        # matter -- Daniel's notes describe them as near-identical (only
+        # which corner pixel is clear/colored differs) -- so one
+        # (DITHER_BLOCK_166) is picked consistently rather than cycled.
+        return pc.DITHER_BLOCK_166, False, color
     if count == 1:
         return _ONE_ON_GLYPHS[pattern], False, color
     if count == 2 and pattern in _TWO_ON_GLYPHS:
