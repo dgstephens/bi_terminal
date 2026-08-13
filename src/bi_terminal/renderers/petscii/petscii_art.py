@@ -250,6 +250,49 @@ def _quadrant_cell(
     return SPACE, True, color
 
 
+def compute_cell_grid(img) -> Tuple[int, int, List[List[Tuple[bytes, bool, Optional[bytes]]]]]:
+    """Shared by image_to_petscii_rows() (real door output) AND
+    scripts/petscii_preview.py (the offline JPG-vs-PETSCII-PNG comparison
+    tool used to tune this algorithm against a source photo without a live
+    SyncTERM/Synchronet connection) -- extracted 2026-08-13 specifically so
+    the two can never drift out of sync: the preview tool must be deciding
+    EXACTLY what the real door would, not a reimplementation that could
+    quietly diverge. Takes an already-opened PIL Image (RGB mode) --
+    downloading/opening is the caller's job (image_to_petscii_rows() does
+    it from a URL; the preview tool does it from a local file).
+
+    Returns (w, h, grid) where grid[y][x] is this cell's
+    (glyph, reverse, color) from _quadrant_cell() -- the same three-tuple
+    shape, just organized as a 2D grid instead of an encoded byte stream."""
+    w = GRID_WIDTH
+    aspect = img.height / img.width
+    # Terminal character cells are roughly twice as tall as they are
+    # wide (matches the C64's own 8x8 cell on a 320x200-over-4:3
+    # display) -- halving the naive aspect-derived row count corrects
+    # for that. This formula is UNCHANGED from v1 despite now sampling
+    # a 2x2 sub-pixel grid per cell instead of one sample per cell: each
+    # sub-pixel inherits the same ~1:2 width:height proportions as the
+    # whole cell (a cell split into 2x2 sub-regions keeps that same
+    # aspect at the sub-region level), so the correction factor that
+    # applied to the whole sample grid before still applies the same
+    # way now -- only the SAMPLING resolution changes (w*2 x h*2
+    # instead of w x h), not this row-count formula.
+    h = max(1, int(w * aspect * 0.5))
+    img = img.resize((w * 2, h * 2))
+
+    grid = []
+    for y in range(h):
+        row_cells = []
+        for x in range(w):
+            top_left = img.getpixel((x * 2, y * 2))
+            top_right = img.getpixel((x * 2 + 1, y * 2))
+            bottom_left = img.getpixel((x * 2, y * 2 + 1))
+            bottom_right = img.getpixel((x * 2 + 1, y * 2 + 1))
+            row_cells.append(_quadrant_cell(top_left, top_right, bottom_left, bottom_right))
+        grid.append(row_cells)
+    return w, h, grid
+
+
 def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
     """Download *url* and return one bytes chunk per image row, each
     ending in RETURN and fully self-contained (including its own
@@ -273,21 +316,7 @@ def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
         resp.raise_for_status()
         img = Image.open(BytesIO(resp.content)).convert("RGB")
 
-        w = GRID_WIDTH
-        aspect = img.height / img.width
-        # Terminal character cells are roughly twice as tall as they are
-        # wide (matches the C64's own 8x8 cell on a 320x200-over-4:3
-        # display) -- halving the naive aspect-derived row count corrects
-        # for that. This formula is UNCHANGED from v1 despite now sampling
-        # a 2x2 sub-pixel grid per cell instead of one sample per cell: each
-        # sub-pixel inherits the same ~1:2 width:height proportions as the
-        # whole cell (a cell split into 2x2 sub-regions keeps that same
-        # aspect at the sub-region level), so the correction factor that
-        # applied to the whole sample grid before still applies the same
-        # way now -- only the SAMPLING resolution changes (w*2 x h*2
-        # instead of w x h), not this row-count formula.
-        h = max(1, int(w * aspect * 0.5))
-        img = img.resize((w * 2, h * 2))
+        w, h, grid = compute_cell_grid(img)
 
         rows = []
         current_color = None
@@ -295,11 +324,7 @@ def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
             row = bytearray()
             current_reverse = False
             for x in range(w):
-                top_left = img.getpixel((x * 2, y * 2))
-                top_right = img.getpixel((x * 2 + 1, y * 2))
-                bottom_left = img.getpixel((x * 2, y * 2 + 1))
-                bottom_right = img.getpixel((x * 2 + 1, y * 2 + 1))
-                glyph, reverse, color = _quadrant_cell(top_left, top_right, bottom_left, bottom_right)
+                glyph, reverse, color = grid[y][x]
                 if reverse != current_reverse:
                     row += pc.REVERSE_ON if reverse else pc.REVERSE_OFF
                     current_reverse = reverse

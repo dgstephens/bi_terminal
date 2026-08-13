@@ -27,6 +27,7 @@ from bi_terminal.renderers.petscii.petscii_art import (
     _has_significant_color_variance,
     _nearest_color,
     _quadrant_cell,
+    compute_cell_grid,
     image_to_petscii_rows,
 )
 
@@ -137,6 +138,46 @@ def test_image_to_petscii_rows_color_carries_across_rows():
 
 def test_grid_width_fits_the_40_column_screen():
     assert GRID_WIDTH < 40
+
+
+# ── compute_cell_grid() ────────────────────────────────────────────────────
+# Extracted 2026-08-13 so scripts/petscii_preview.py (an offline PNG
+# renderer used to tune this algorithm against a real photo) can share the
+# EXACT same per-cell decisions image_to_petscii_rows() uses, rather than
+# risking a reimplementation that quietly drifts out of sync.
+
+
+def test_compute_cell_grid_shape_matches_declared_dimensions():
+    fake_img = _fake_image(width=100, height=100, color=(0xFF, 0xFF, 0xFF))
+    w, h, grid = compute_cell_grid(fake_img)
+    assert w == GRID_WIDTH
+    assert len(grid) == h
+    assert all(len(row) == w for row in grid)
+
+
+def test_compute_cell_grid_cells_are_quadrant_cell_shaped_tuples():
+    fake_img = _fake_image(width=100, height=100, color=(0xFF, 0xFF, 0xFF))
+    _, _, grid = compute_cell_grid(fake_img)
+    glyph, reverse, color = grid[0][0]
+    assert isinstance(glyph, bytes)
+    assert isinstance(reverse, bool)
+    assert color is None or isinstance(color, bytes)
+
+
+def test_image_to_petscii_rows_matches_compute_cell_grid_via_the_same_cells():
+    """Not a reimplementation-comparison (there's only one implementation
+    now) -- just confirms image_to_petscii_rows()'s encoded byte stream is
+    actually built FROM compute_cell_grid()'s cells, by checking a solid
+    image's grid is uniformly "4 on" and the resulting rows are uniformly
+    reversed, consistent with each other."""
+    mock_resp = MagicMock()
+    mock_resp.content = b"fake-bytes"
+    fake_img = _fake_image(width=100, height=100, color=(0xFF, 0xFF, 0xFF))
+    with patch("requests.get", return_value=mock_resp), patch("PIL.Image.open", return_value=fake_img):
+        rows = image_to_petscii_rows("https://example.com/x.png")
+        _, _, grid = compute_cell_grid(fake_img)
+    assert all(cell[1] is True for row in grid for cell in row)  # every cell reversed
+    assert all(pc.REVERSE_ON in row for row in rows)
 
 
 def test_solid_nonblack_image_embeds_reverse_toggling_per_row():

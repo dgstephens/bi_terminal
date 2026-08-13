@@ -115,11 +115,10 @@ Point SyncTERM at the same host, port `6503`, connection type **RAW** (see
 "Telnet negotiation bytes" above), terminal type PETSCII/CG — same as the
 real door, just a different port. Page through both character
 sets and note the decimal label next to any glyph that looks like a solid
-block, a half-block, a shading/dither pattern, or a quadrant piece — that's
-the ground truth `petscii_codes.py`'s `LEFT_HALF_BLOCK`/`LOWER_HALF_BLOCK`/
-`MEDIUM_SHADE`/`RIGHT_HALF_BLOCK` (currently unverified guesses, flagged as
-such in that file) need to be corrected against before any future
-image-detail work reuses them.
+block, a half-block, a shading/dither pattern, or a quadrant piece — this
+is how `petscii_codes.py`'s block/shading constants got their real,
+CONFIRMED byte values (see that file's own comments; Daniel's findings are
+also recorded in `~/vimwiki/Binventory/TestingPETSCIIChars.wiki`).
 
 **Debug logging is always on for this tool** (unlike the real door's
 opt-in `BI_TERMINAL_PETSCII_DEBUG_LOG`) — every raw byte received and what
@@ -128,3 +127,22 @@ key it resolved to, plus every outbound row, gets logged to
 this machine runs both `bi_terminal` and Synchronet, that log can just be
 read directly here after a connection attempt — no need to reconstruct or
 describe what happened from memory.
+
+## Offline image-algorithm tuning (no live connection needed)
+
+`scripts/petscii_preview.py` renders `petscii_art.py`'s actual output
+(reusing its real per-cell decision function directly, not a
+reimplementation) to a PNG, so the algorithm can be tuned against a real
+photo without a live SyncTERM/Synchronet connection for every iteration:
+
+```bash
+python3 scripts/petscii_preview.py path/to/photo.jpg -o preview.png
+```
+
+Needs `cbmcodecs2` (`pip install cbmcodecs2` — a well-tested independent
+library for the real PETSCII-CHR$-to-C64-screen-code mapping, used here to
+index into a real character ROM) and a local chargen ROM binary, path
+given via `--chargen` or auto-detected from a local VICE install (see
+`WriterDeck.wiki`'s VICE build notes) — deliberately **not** bundled in
+this repo, since even the free open-roms replacement is separately
+licensed, let alone a real Commodore ROM dump.

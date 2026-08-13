@@ -6,3 +6,10 @@ dist/
 .pytest_cache/
 .venv/
 venv/
+
+# scripts/petscii_preview.py's default output + any chargen ROM someone
+# might drop in-tree for convenience -- a real chargen is copyrighted
+# (or, for open-roms, separately licensed) and must never be committed.
+petscii_preview.png
+*.chargen
+chargen*.bin

@@ -44,6 +44,16 @@ atascii = []
 dev = [
     "pytest>=7.0",
 ]
+# Local-only tooling for scripts/petscii_preview.py -- NOT needed to run
+# any door or to run the test suite, only for offline PETSCII-image-algorithm
+# tuning against a real photo (see the script's own docstring). Deliberately
+# its own extra rather than folded into `petscii` or `dev`: a real door
+# deployment never needs cbmcodecs2, and running the test suite doesn't
+# either.
+petscii-preview = [
+    "Pillow>=10.0.0",
+    "cbmcodecs2",
+]
 
 [project.scripts]
 bi-terminal-textual = "bi_terminal.entry_textual:main"
