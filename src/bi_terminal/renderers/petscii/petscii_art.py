@@ -21,11 +21,7 @@ this specifically:
    resolution from ▄), a PETSCII character cell only ever has ONE
    effective controllable color. There is no equivalent trick available —
    this is a genuine, confirmed hardware/protocol constraint, not a gap
-   in this implementation. The one real trick PETSCII *does* offer:
-   REVERSE_ON turns a plain space into a solid block of the current
-   foreground color (space has no glyph pixels, so reversing it paints
-   the whole cell) — that's the basis for the "chunky pixel" mosaic
-   approach below: one solid-colored block per character cell.
+   in this implementation.
 
 2. The 16-color palette is fixed hardware, not arbitrary RGB. Values below
    are Philip "Pepto" Timmermann's well-known, widely-cited measured VIC-II
@@ -33,6 +29,61 @@ this specifically:
    reference this project already used when picking petscii_codes.py's
    color names in the first place. Every source pixel gets quantized to
    its nearest (least-squared RGB distance) match among these 16.
+
+Quadrant-glyph mode (2026-08-13), replacing the original flat "one solid
+color per cell" v1 approach entirely — this is what Daniel originally asked
+for back on 2026-08-12 ("reduce the image to 2x columns x 2x rows... so
+each PETSCII character is actually 4 pixels — 2 horizontal, 2 vertical")
+and what an EARLIER same-day attempt (petscii_art.py commit 87b875a,
+reverted) tried and got visibly wrong, for two compounding reasons: it only
+ever sub-sampled horizontally (never touched vertical resolution at all),
+and it used guessed byte values for the "shading" glyph that turned out
+flatly wrong on a real screen. Both are fixed now: real vertical
+sub-sampling below, and the glyph bytes come from petscii_codes.py's
+CONFIRMED section — Daniel actually paged through every PETSCII byte value
+on a real SyncTERM connection (renderers/petscii/char_browser.py) and
+hand-recorded what each one looks like.
+
+Each character cell now samples a 2x2 grid of sub-pixels (top-left,
+top-right, bottom-left, bottom-right). Each sub-pixel is independently
+quantized against the 16-color palette; one that quantizes to BLACK is
+treated as "off" (shows through as whatever the local terminal background
+already is, exactly like a plain unreversed space already does — no new
+concept, just applying the existing quantization result instead of always
+painting black as a literal drawn color) and everything else as "on."
+Since a PETSCII cell only ever has ONE controllable color (constraint #1
+above), all "on" sub-pixels get averaged into a single representative
+color for the whole cell, then that average is itself quantized to the
+nearest palette entry.
+
+Which of the 16 possible on/off patterns get an EXACT confirmed glyph
+match, and which have to round up to a plain solid block instead, is a
+direct, honest consequence of what's actually confirmed to exist in
+PETSCII's character ROM (petscii_codes.py's CONFIRMED section) — not an
+implementation gap:
+  - 0 on  -> plain space (shows background)
+  - 1 on  -> the matching QUADRANT_* corner glyph (all 4 confirmed)
+  - 2 on  -> LEFT_HALF_BLOCK / LOWER_HALF_BLOCK / QUADRANT_DIAGONAL_TL_BR
+             for the 3 of 6 possible two-corner combinations Daniel's real
+             character-browser survey actually found a glyph for; the
+             other 3 (top half, right half, the other diagonal) genuinely
+             don't appear anywhere in that survey of the full non-control
+             byte range, so they're very likely just not in the ROM at
+             all, not merely "not found yet" — those round up to a solid
+             block rather than guess at an unconfirmed byte.
+  - 3 on  -> no confirmed 3-quadrant glyph exists either -- rounds up to a
+             solid block.
+  - 4 on  -> solid block, the same REVERSE_ON+space "chunky pixel" trick
+             v1 already used and Daniel already confirmed looks right.
+
+REVERSE_ON/OFF is now embedded directly in each row's own bytes (state
+tracked cell-by-cell, only emitted on an actual change, same run-length
+idea already used for color) rather than the caller wrapping the whole row
+externally — a genuine, deliberate contract change from the v1/tiered-
+detail eras, made necessary because a single row can now freely mix
+reversed (solid-block) and non-reversed (quadrant/half-glyph) cells, which
+a single whole-row wrap could never express. See renderer.py's show_image
+for the caller-side half of this change.
 """
 
 from io import BytesIO
@@ -69,34 +120,73 @@ modules for one constant."""
 
 SPACE = bytes([32])
 
+# Confirmed glyph lookup tables (petscii_codes.py's CONFIRMED section) —
+# keyed by (top_left, top_right, bottom_left, bottom_right) on/off pattern.
+# See this module's docstring for why only these particular patterns have
+# an exact match.
+_ONE_ON_GLYPHS = {
+    (True, False, False, False): pc.QUADRANT_TOP_LEFT,
+    (False, True, False, False): pc.QUADRANT_TOP_RIGHT,
+    (False, False, True, False): pc.QUADRANT_BOTTOM_LEFT,
+    (False, False, False, True): pc.QUADRANT_BOTTOM_RIGHT,
+}
+_TWO_ON_GLYPHS = {
+    (True, False, True, False): pc.LEFT_HALF_BLOCK,  # top-left + bottom-left
+    (False, False, True, True): pc.LOWER_HALF_BLOCK,  # bottom-left + bottom-right
+    (True, False, False, True): pc.QUADRANT_DIAGONAL_TL_BR,  # top-left + bottom-right
+}
+
 
 def _nearest_color(rgb: Tuple[int, int, int]) -> bytes:
-    r, g, b = rgb
     best = min(_PALETTE, key=lambda entry: sum((a - c) ** 2 for a, c in zip(entry[0], rgb)))
     return best[1]
 
 
-def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
-    """Download *url* and return one bytes chunk per image row (NOT
-    including REVERSE_ON/REVERSE_OFF -- the caller wraps the whole sequence
-    in those, since bracketing a multi-write sequence is a display/pacing
-    concern, not a conversion one), or None on any failure -- matching
-    _shared_ansi_art.py's image_to_renderable() contract (a renderer
-    should never crash on a bad/unreachable image URL, just skip rendering
-    it).
+def _average_color(pixels: List[Tuple[int, int, int]]) -> bytes:
+    n = len(pixels)
+    avg = tuple(sum(p[i] for p in pixels) / n for i in range(3))
+    return _nearest_color(avg)
 
-    Returns a LIST rather than one concatenated bytes blob (the original
-    2026-08-11 shape) as of 2026-08-12, in response to a real live report:
-    viewing an image through an actual Synchronet connection showed only
-    one row, then nothing. The generation side was independently confirmed
-    correct beforehand (a captured real image block genuinely contained 14
-    separate RETURN-terminated rows, not one) -- the leading hypothesis is
-    that writing the whole ~700-byte, many-control-code image in a single
-    burst overwhelms or races Synchronet's own real-time terminal
-    processing, unlike the naturally byte-paced serial/modem link PETSCII
-    was designed for. Returning per-row chunks lets the caller
-    (renderer.py's show_image) write and flush one row at a time instead of
-    one giant write -- see its own comment for the pacing this enables."""
+
+def _quadrant_cell(
+    top_left: Tuple[int, int, int],
+    top_right: Tuple[int, int, int],
+    bottom_left: Tuple[int, int, int],
+    bottom_right: Tuple[int, int, int],
+) -> Tuple[bytes, bool, Optional[bytes]]:
+    """Decide one cell's (glyph, reverse, color) from its 4 sampled
+    sub-pixels. `color` is None only when the cell is fully "off" (nothing
+    to draw, no color change needed) -- see this module's docstring for the
+    on/off/glyph-selection rules."""
+    corners = (top_left, top_right, bottom_left, bottom_right)
+    pattern = tuple(_nearest_color(c) != pc.BLACK for c in corners)
+    on_pixels = [c for c, on in zip(corners, pattern) if on]
+    count = len(on_pixels)
+    if count == 0:
+        return SPACE, False, None
+    color = _average_color(on_pixels)
+    if count == 1:
+        return _ONE_ON_GLYPHS[pattern], False, color
+    if count == 2 and pattern in _TWO_ON_GLYPHS:
+        return _TWO_ON_GLYPHS[pattern], False, color
+    # count == 4, or count in (2, 3) with no confirmed exact glyph -- round
+    # up to a solid block rather than guess at an unconfirmed byte.
+    return SPACE, True, color
+
+
+def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
+    """Download *url* and return one bytes chunk per image row, each
+    ending in RETURN and fully self-contained (including its own
+    REVERSE_ON/OFF toggling -- see this module's docstring), or None on any
+    failure -- matching _shared_ansi_art.py's image_to_renderable()
+    contract (a renderer should never crash on a bad/unreachable image
+    URL, just skip rendering it).
+
+    Returns a LIST rather than one concatenated bytes blob so the caller
+    (renderer.py's show_image) can write/flush/pace each row individually
+    -- a real, live-reported bug (2026-08-12): a single large burst write
+    showed only the image's first row through an actual Synchronet
+    connection."""
     if not url:
         return None
     try:
@@ -112,23 +202,37 @@ def image_to_petscii_rows(url: str) -> Optional[List[bytes]]:
         # Terminal character cells are roughly twice as tall as they are
         # wide (matches the C64's own 8x8 cell on a 320x200-over-4:3
         # display) -- halving the naive aspect-derived row count corrects
-        # for that, the same class of correction _shared_ansi_art.py's
-        # "ansi" mode gets for free from its half-block trick (2 image
-        # rows per character row) but must be done explicitly here since a
-        # PETSCII cell only ever represents ONE image sample, not two.
+        # for that. This formula is UNCHANGED from v1 despite now sampling
+        # a 2x2 sub-pixel grid per cell instead of one sample per cell: each
+        # sub-pixel inherits the same ~1:2 width:height proportions as the
+        # whole cell (a cell split into 2x2 sub-regions keeps that same
+        # aspect at the sub-region level), so the correction factor that
+        # applied to the whole sample grid before still applies the same
+        # way now -- only the SAMPLING resolution changes (w*2 x h*2
+        # instead of w x h), not this row-count formula.
         h = max(1, int(w * aspect * 0.5))
-        img = img.resize((w, h))
+        img = img.resize((w * 2, h * 2))
 
         rows = []
         current_color = None
         for y in range(h):
             row = bytearray()
+            current_reverse = False
             for x in range(w):
-                color = _nearest_color(img.getpixel((x, y)))
-                if color != current_color:
+                top_left = img.getpixel((x * 2, y * 2))
+                top_right = img.getpixel((x * 2 + 1, y * 2))
+                bottom_left = img.getpixel((x * 2, y * 2 + 1))
+                bottom_right = img.getpixel((x * 2 + 1, y * 2 + 1))
+                glyph, reverse, color = _quadrant_cell(top_left, top_right, bottom_left, bottom_right)
+                if reverse != current_reverse:
+                    row += pc.REVERSE_ON if reverse else pc.REVERSE_OFF
+                    current_reverse = reverse
+                if color is not None and color != current_color:
                     row += color
                     current_color = color
-                row += SPACE
+                row += glyph
+            if current_reverse:
+                row += pc.REVERSE_OFF  # never leave a row still in reverse mode
             row += pc.RETURN
             rows.append(bytes(row))
         return rows

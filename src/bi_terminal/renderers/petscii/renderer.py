@@ -397,20 +397,19 @@ class PetsciiRenderer:
                 # Written row-by-row with pacing, not one big burst write --
                 # see PetsciiIO.write_rows_paced's own comment for the
                 # 2026-08-12 bug that addressed (only the first row
-                # visible). That alone wasn't the whole story though --
-                # still live-reported broken the SAME way even with
-                # pacing: one visible row, then the cursor correctly
-                # tracking down the screen but nothing rendering. REVERSE_ON
-                # was only being sent ONCE, before the first row, relying on
-                # it persisting as a toggle across every subsequent RETURN
-                # -- true on real C64 hardware, but apparently NOT true of
-                # Synchronet's own PETSCII/CTerm emulation, which appears to
-                # reset reverse-video state at each line break. Re-asserting
-                # REVERSE_ON at the START of every row (not just once
-                # globally) removes the dependency on that cross-line
-                # persistence entirely, real bug or not.
-                self.io.write_rows_paced([pc.REVERSE_ON + row for row in rows])
-                self.io.write_raw(pc.REVERSE_OFF)
+                # visible).
+                #
+                # REVERSE_ON/OFF is no longer wrapped around each row HERE
+                # (was, through 2026-08-12's flat mosaic algorithm) --
+                # changed the same day the quadrant-glyph algorithm shipped
+                # (see petscii_art.py's module docstring): a single row can
+                # now freely mix reversed (solid-block) and non-reversed
+                # (quadrant/half-glyph) cells, which a single whole-row wrap
+                # could never express, so image_to_petscii_rows() now embeds
+                # its own REVERSE_ON/OFF toggling directly in each row's
+                # bytes and every row is guaranteed to end back in normal
+                # (non-reversed) mode. Simple pass-through here now.
+                self.io.write_rows_paced(rows)
             hint = "L/R switch  Esc close" if len(urls) > 1 else "Press any key to continue..."
             self.io.write_raw(b"\r" + pc.MEDIUM_GREY + _enc(_truncate(hint)) + b"\r")
             key = self.io.read_key()

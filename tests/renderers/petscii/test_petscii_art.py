@@ -9,6 +9,13 @@ concatenated blob -- changed 2026-08-12 in response to a real live report
 so the caller can write+flush+pace each row individually. See
 renderer.py's show_image() and io.py's PetsciiIO.write_rows_paced() for
 the write-side half of that fix.
+
+Quadrant-glyph mode (2026-08-13): each cell now samples a 2x2 sub-pixel
+grid and picks a glyph from petscii_codes.py's CONFIRMED byte values (real
+data Daniel read off a real SyncTERM screen, not guesses) -- see the
+module's own docstring for the full on/off/glyph-selection rules. Rows are
+now self-contained regarding REVERSE_ON/OFF (a contract change from the
+earlier flat mosaic, where the caller wrapped the whole row externally).
 """
 
 from unittest.mock import MagicMock, patch
@@ -16,7 +23,9 @@ from unittest.mock import MagicMock, patch
 from bi_terminal.renderers.petscii import petscii_codes as pc
 from bi_terminal.renderers.petscii.petscii_art import (
     GRID_WIDTH,
+    _average_color,
     _nearest_color,
+    _quadrant_cell,
     image_to_petscii_rows,
 )
 
@@ -93,9 +102,10 @@ def test_image_to_petscii_rows_returns_one_chunk_per_row_ending_in_return():
     assert len(rows) > 1
     for row in rows:
         assert row.endswith(pc.RETURN)
-    # Not wrapped in REVERSE_ON/OFF here -- that's the caller's job now
-    # (a display/pacing concern, not conversion), see renderer.py.
-    assert not any(row.startswith(pc.REVERSE_ON) for row in rows)
+    # This particular fake image is solid BLACK -- every sub-pixel
+    # quantizes to "off," so no glyph in this specific case needs
+    # REVERSE_ON at all. See test_solid_nonblack_image_embeds_reverse_
+    # toggling_per_row below for the contract-change case that does.
 
 
 def test_image_to_petscii_rows_only_emits_color_byte_on_change_within_a_row():
@@ -126,3 +136,131 @@ def test_image_to_petscii_rows_color_carries_across_rows():
 
 def test_grid_width_fits_the_40_column_screen():
     assert GRID_WIDTH < 40
+
+
+def test_solid_nonblack_image_embeds_reverse_toggling_per_row():
+    """Contract change from the earlier flat mosaic (renderer.py used to
+    wrap every row in REVERSE_ON/OFF externally) -- rows are now
+    self-contained. A solid non-black image makes every cell an "all 4 on"
+    solid block, so every row should both start reversed and end back in
+    normal mode (the explicit REVERSE_OFF at each row's end, since
+    current_reverse resets per row -- matching the confirmed Synchronet
+    behavior of resetting reverse state at every RETURN, defensively,
+    regardless of whether that's also true on other clients)."""
+    mock_resp = MagicMock()
+    mock_resp.content = b"fake-bytes"
+    fake_img = _fake_image(width=10, height=10, color=(0xFF, 0xFF, 0xFF))
+    with patch("requests.get", return_value=mock_resp), patch("PIL.Image.open", return_value=fake_img):
+        rows = image_to_petscii_rows("https://example.com/x.png")
+    assert rows
+    for row in rows:
+        assert pc.REVERSE_ON in row
+        # every row must end back in normal mode, not left reversed
+        assert row.index(pc.REVERSE_OFF) > row.index(pc.REVERSE_ON)
+        assert row.endswith(pc.REVERSE_OFF + pc.RETURN)
+
+
+# ── _quadrant_cell() ─────────────────────────────────────────────────────
+# Direct tests of the on/off/glyph-selection rules -- see petscii_art.py's
+# module docstring for the full reasoning. BLACK = "off," anything else =
+# "on"; corners are (top_left, top_right, bottom_left, bottom_right).
+
+_WHITE = (0xFF, 0xFF, 0xFF)
+_BLACK = (0x00, 0x00, 0x00)
+
+
+def test_quadrant_cell_all_off_is_plain_space():
+    from bi_terminal.renderers.petscii.petscii_art import SPACE
+
+    glyph, reverse, color = _quadrant_cell(_BLACK, _BLACK, _BLACK, _BLACK)
+    assert glyph == SPACE
+    assert reverse is False
+    assert color is None
+
+
+def test_quadrant_cell_all_on_is_reversed_solid_block():
+    from bi_terminal.renderers.petscii.petscii_art import SPACE
+
+    glyph, reverse, color = _quadrant_cell(_WHITE, _WHITE, _WHITE, _WHITE)
+    assert glyph == SPACE
+    assert reverse is True
+    assert color == pc.WHITE
+
+
+def test_quadrant_cell_single_corner_on_matches_confirmed_glyph():
+    from bi_terminal.renderers.petscii.petscii_art import SPACE
+
+    cases = [
+        ((_WHITE, _BLACK, _BLACK, _BLACK), pc.QUADRANT_TOP_LEFT),
+        ((_BLACK, _WHITE, _BLACK, _BLACK), pc.QUADRANT_TOP_RIGHT),
+        ((_BLACK, _BLACK, _WHITE, _BLACK), pc.QUADRANT_BOTTOM_LEFT),
+        ((_BLACK, _BLACK, _BLACK, _WHITE), pc.QUADRANT_BOTTOM_RIGHT),
+    ]
+    for corners, expected_glyph in cases:
+        glyph, reverse, color = _quadrant_cell(*corners)
+        assert glyph == expected_glyph
+        assert glyph != SPACE
+        assert reverse is False
+        assert color == pc.WHITE
+
+
+def test_quadrant_cell_confirmed_two_corner_combos():
+    cases = [
+        ((_WHITE, _BLACK, _WHITE, _BLACK), pc.LEFT_HALF_BLOCK),  # top-left + bottom-left
+        ((_BLACK, _BLACK, _WHITE, _WHITE), pc.LOWER_HALF_BLOCK),  # bottom-left + bottom-right
+        ((_WHITE, _BLACK, _BLACK, _WHITE), pc.QUADRANT_DIAGONAL_TL_BR),  # top-left + bottom-right
+    ]
+    for corners, expected_glyph in cases:
+        glyph, reverse, color = _quadrant_cell(*corners)
+        assert glyph == expected_glyph
+        assert reverse is False
+        assert color == pc.WHITE
+
+
+def test_quadrant_cell_unconfirmed_two_corner_combos_round_up_to_solid_block():
+    """Top half (TL+TR), right half (TR+BR), and the other diagonal
+    (TR+BL) have no confirmed glyph in petscii_codes.py's CONFIRMED section
+    -- Daniel's real character-browser survey of the full non-control byte
+    range never found one, so these round up to a solid block rather than
+    guess at an unconfirmed byte (see this module's docstring)."""
+    from bi_terminal.renderers.petscii.petscii_art import SPACE
+
+    cases = [
+        (_WHITE, _WHITE, _BLACK, _BLACK),  # top half
+        (_BLACK, _WHITE, _BLACK, _WHITE),  # right half
+        (_BLACK, _WHITE, _WHITE, _BLACK),  # top-right + bottom-left diagonal
+    ]
+    for corners in cases:
+        glyph, reverse, color = _quadrant_cell(*corners)
+        assert glyph == SPACE
+        assert reverse is True
+        assert color == pc.WHITE
+
+
+def test_quadrant_cell_three_corners_on_rounds_up_to_solid_block():
+    """No confirmed 3-quadrant glyph exists either -- same fallback."""
+    from bi_terminal.renderers.petscii.petscii_art import SPACE
+
+    glyph, reverse, color = _quadrant_cell(_WHITE, _WHITE, _WHITE, _BLACK)
+    assert glyph == SPACE
+    assert reverse is True
+    assert color == pc.WHITE
+
+
+def test_quadrant_cell_mixed_colors_average_and_quantize():
+    """When the "on" corners aren't identical, the cell's color is the
+    average of just the ON corners (BLACK/off corners excluded from the
+    average), quantized to the nearest palette entry -- not simply
+    whichever corner happened to be sampled first."""
+    red = (0x68, 0x37, 0x2B)  # exact palette RED
+    glyph, reverse, color = _quadrant_cell(red, _BLACK, red, _BLACK)
+    assert glyph == pc.LEFT_HALF_BLOCK
+    assert color == pc.RED
+
+
+def test_average_color_excludes_nothing_itself_caller_filters_off_pixels():
+    """_average_color() itself just averages whatever list it's given --
+    the "exclude off/BLACK corners" filtering happens in _quadrant_cell(),
+    not here. Direct unit coverage of the averaging+quantization math."""
+    assert _average_color([(0xFF, 0xFF, 0xFF), (0xFF, 0xFF, 0xFF)]) == pc.WHITE
+    assert _average_color([(0x00, 0x00, 0x00)]) == pc.BLACK

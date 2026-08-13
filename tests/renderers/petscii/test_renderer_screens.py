@@ -343,9 +343,18 @@ def test_show_image_renders_real_petscii_art_rows():
     and this test's own assertions) so show_image can write/flush/pace
     each row individually, in response to a real live report that a large
     single burst write showed only the image's first row through an actual
-    Synchronet connection. REVERSE_ON/OFF are now show_image's own
-    responsibility (a display concern), not the converter's."""
-    fake_rows = [pc.RED + b"  " + pc.RETURN]
+    Synchronet connection.
+
+    REVERSE_ON/OFF are now image_to_petscii_rows()'s OWN responsibility,
+    embedded per-row (changed again 2026-08-13, when the quadrant-glyph
+    algorithm shipped -- a single row can mix reversed and non-reversed
+    cells, which show_image wrapping the whole row externally could never
+    express). show_image itself is now a simple pass-through -- this test
+    uses a fake row that already contains its own REVERSE_ON/OFF, matching
+    what a real image_to_petscii_rows() call now produces, and just
+    confirms show_image writes it through unmodified rather than adding or
+    stripping anything."""
+    fake_rows = [pc.REVERSE_ON + pc.RED + b"  " + pc.REVERSE_OFF + pc.RETURN]
     with patch(
         "bi_terminal.renderers.petscii.renderer.image_to_petscii_rows", return_value=fake_rows
     ):
@@ -354,10 +363,7 @@ def test_show_image_renders_real_petscii_art_rows():
         val = out.getvalue()
         _close(fds)
     assert result is None
-    assert pc.REVERSE_ON in val
-    assert fake_rows[0] in val
-    assert pc.REVERSE_OFF in val
-    assert val.index(pc.REVERSE_ON) < val.index(fake_rows[0]) < val.index(pc.REVERSE_OFF)
+    assert fake_rows[0] in val  # written through byte-for-byte, unmodified
     assert b"press any key" in val.lower()
 
 
