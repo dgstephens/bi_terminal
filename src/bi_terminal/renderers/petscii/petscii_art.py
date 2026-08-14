@@ -160,22 +160,28 @@ _CELL_WIDTH_TO_HEIGHT_RATIO = 5 / 6
 
 
 def _fit_grid_dimensions(aspect: float) -> Tuple[int, int]:
-    """Fit-within-bounds sizing (the same idea as CSS `object-fit:
-    contain`): picks (w, h) that best preserves *aspect* (a source image's
-    height/width ratio) within GRID_WIDTH x MAX_HEIGHT, using the C64's
-    real cell geometry (_CELL_WIDTH_TO_HEIGHT_RATIO) rather than always
-    using the full column budget regardless of the source image's shape.
-    A landscape photo (the common case) still uses the full GRID_WIDTH
-    columns, same as before this fix. A tall/portrait photo, or any photo
-    where the mathematically correct height would exceed MAX_HEIGHT,
-    instead shrinks the WIDTH to match -- letterboxing narrower than the
-    full screen rather than either stretching the image or silently
-    cropping/exceeding the screen's real row budget."""
+    """Real, live-reported finding (2026-08-14): the first version of this
+    function did a strict CSS `object-fit: contain`-style fit -- shrinking
+    the WIDTH (letterboxing) whenever the correctly-computed height (see
+    _CELL_WIDTH_TO_HEIGHT_RATIO) would exceed MAX_HEIGHT, to preserve the
+    source image's exact aspect ratio. Mathematically correct, but looked
+    wrong on a real screen: Daniel, viewing the kitten photo through a
+    real C64 terminal, reported it "very narrow -- not taking up nearly as
+    much horizontal space as it could have." Measured: that letterboxing
+    used only 27 of the available 38 columns (71%) for that photo -- a
+    real, meaningful waste of screen space, not a rounding-error-scale
+    difference.
+
+    Changed to ALWAYS use the full GRID_WIDTH columns, only clamping
+    (never exceeding) MAX_HEIGHT -- a tall/portrait photo now gets some
+    vertical squashing instead of being letterboxed narrower. A real
+    tradeoff, not a free fix: proportions are no longer perfectly
+    preserved for square/portrait sources, in exchange for consistently
+    using the full screen width, which is what actually looked better on
+    real hardware. Landscape photos (the common case, where h already
+    comes out <= MAX_HEIGHT) are completely unaffected either way."""
     h = max(1, round(GRID_WIDTH * aspect * _CELL_WIDTH_TO_HEIGHT_RATIO))
-    if h <= MAX_HEIGHT:
-        return GRID_WIDTH, h
-    w = max(1, round(MAX_HEIGHT / (aspect * _CELL_WIDTH_TO_HEIGHT_RATIO)))
-    return min(w, GRID_WIDTH), MAX_HEIGHT
+    return GRID_WIDTH, min(h, MAX_HEIGHT)
 
 
 SPACE = bytes([32])

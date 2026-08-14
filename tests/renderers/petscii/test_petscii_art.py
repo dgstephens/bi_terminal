@@ -172,17 +172,20 @@ def test_compute_cell_grid_cells_are_quadrant_cell_shaped_tuples():
     assert color is None or isinstance(color, bytes)
 
 
-def test_compute_cell_grid_letterboxes_a_near_square_image():
-    """Real, live-reported finding (2026-08-13): the old height formula
-    used an incorrect "cell is 2x taller than wide" assumption -- the
-    correct C64 cell geometry (_CELL_WIDTH_TO_HEIGHT_RATIO) means a
-    square-ish photo now needs MORE rows than MAX_HEIGHT allows at full
-    GRID_WIDTH, so it correctly letterboxes (fewer columns) instead of
-    either overflowing the screen or silently reverting to the old wrong
-    ratio."""
+def test_compute_cell_grid_clamps_height_for_a_near_square_image_without_narrowing():
+    """Real, live-reported finding (2026-08-14): an earlier version of this
+    function letterboxed (narrowed the WIDTH) whenever the correctly-
+    computed height exceeded MAX_HEIGHT. Looked mathematically right but
+    wrong in practice -- Daniel, viewing the kitten photo through a real
+    C64 terminal, reported it "very narrow -- not taking up nearly as much
+    horizontal space as it could have" (measured: only 71% of available
+    width). Changed to always use the full GRID_WIDTH, only clamping
+    height -- a real tradeoff (proportions aren't perfectly preserved for
+    square/portrait sources any more), chosen because it's what actually
+    looked better on real hardware."""
     fake_img = _fake_image(width=100, height=100, color=(0xFF, 0xFF, 0xFF))  # square, aspect 1.0
     w, h, grid = compute_cell_grid(fake_img)
-    assert w < GRID_WIDTH
+    assert w == GRID_WIDTH
     assert h == MAX_HEIGHT
     assert len(grid) == h
     assert all(len(row) == w for row in grid)
@@ -198,11 +201,14 @@ def test_fit_grid_dimensions_landscape_uses_full_width():
     assert h <= MAX_HEIGHT
 
 
-def test_fit_grid_dimensions_extreme_portrait_shrinks_width_not_height():
+def test_fit_grid_dimensions_extreme_portrait_clamps_height_keeps_full_width():
+    """Changed 2026-08-14: width is now ALWAYS the full GRID_WIDTH -- even
+    an extreme portrait photo only clamps height, accepting vertical
+    squashing rather than narrowing the image (see this module's own
+    _fit_grid_dimensions() docstring for why)."""
     w, h = _fit_grid_dimensions(aspect=3.0)  # very tall photo
     assert h == MAX_HEIGHT
-    assert w < GRID_WIDTH
-    assert w >= 1
+    assert w == GRID_WIDTH
 
 
 def test_fit_grid_dimensions_never_exceeds_bounds():
@@ -213,18 +219,18 @@ def test_fit_grid_dimensions_never_exceeds_bounds():
 
 
 def test_fit_grid_dimensions_uses_correct_cell_geometry_not_old_2to1_assumption():
-    """Direct regression test for the reported bug: with the OLD (wrong)
-    0.5 multiplier, a 4:3 photo (aspect 0.75) would compute
+    """Direct regression test for the ORIGINAL reported bug: with the OLD
+    (wrong) 0.5 multiplier, a 4:3 photo (aspect 0.75) would compute
     h = round(38*0.75*0.5) = 14 at the full GRID_WIDTH. With the corrected
     5/6 ratio, the real vertical resolution needed (round(38*0.75*5/6) =
-    24) actually exceeds MAX_HEIGHT -- meaning even an ordinary 4:3 photo
-    now correctly letterboxes rather than silently under-using vertical
-    resolution the way the old formula did. Either way, real usable rows
-    (MAX_HEIGHT = 20) end up strictly more than the old formula's 14."""
+    24) exceeds MAX_HEIGHT, so it clamps to MAX_HEIGHT (20) -- still
+    strictly more real rows than the old formula's 14, at the SAME full
+    GRID_WIDTH either way (width no longer narrows for this case, see
+    2026-08-14's follow-up fix above)."""
     w, h = _fit_grid_dimensions(aspect=0.75)
     assert h == MAX_HEIGHT
     assert h > 14  # strictly more rows than the old (wrong) formula would give
-    assert w < GRID_WIDTH  # letterboxed, not stretched to the full column budget
+    assert w == GRID_WIDTH
 
 
 def test_image_to_petscii_rows_matches_compute_cell_grid_via_the_same_cells():
